@@ -147,7 +147,7 @@ func host() string {
 func TestAuthenticationBehavior(t *testing.T) {
 	// Unauthenticated request should return 401
 	t.Run("unauthenticated_user_rejected", func(t *testing.T) {
-		url := fmt.Sprintf("%s/apis/web/v1/stats", host())
+		url := fmt.Sprintf("%s/apis/web/v1/export", host())
 		resp, err := http.Get(url)
 		if err != nil {
 			t.Fatalf("Failed to make request: %v", err)
@@ -186,17 +186,17 @@ func TestAuthenticationBehavior(t *testing.T) {
 		}
 
 		// Make authenticated request to protected endpoint
-		statsURL := fmt.Sprintf("%s/apis/web/v1/stats", host())
-		statsReq, _ := http.NewRequest("GET", statsURL, nil)
-		statsReq.AddCookie(sessionCookie)
-		statsResp, err := client.Do(statsReq)
+		exportURL := fmt.Sprintf("%s/apis/web/v1/export", host())
+		exportReq, _ := http.NewRequest("GET", exportURL, nil)
+		exportReq.AddCookie(sessionCookie)
+		exportResp, err := client.Do(exportReq)
 		if err != nil {
-			t.Fatalf("Failed to make stats request: %v", err)
+			t.Fatalf("Failed to make export request: %v", err)
 		}
-		defer statsResp.Body.Close()
+		defer exportResp.Body.Close()
 
-		if statsResp.StatusCode != http.StatusOK {
-			t.Errorf("expected 200, got %d", statsResp.StatusCode)
+		if exportResp.StatusCode != http.StatusOK {
+			t.Errorf("expected 200, got %d", exportResp.StatusCode)
 		}
 	})
 }
