@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -146,4 +147,61 @@ func TestMain(m *testing.M) {
 
 func host() string {
 	return fmt.Sprintf("http://%s", cfg.ListenAddr())
+}
+
+func TestAuthenticationBehavior(t *testing.T) {
+	// Unauthenticated request should return 401
+	t.Run("unauthenticated_user_rejected", func(t *testing.T) {
+		url := fmt.Sprintf("%s/apis/web/v1/stats", host())
+		resp, err := http.Get(url)
+		if err != nil {
+			t.Fatalf("Failed to make request: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Errorf("expected 401, got %d", resp.StatusCode)
+		}
+	})
+
+	// Authenticated request should succeed
+	t.Run("authenticated_user_allowed", func(t *testing.T) {
+		client := &http.Client{}
+
+		// Login to get session cookie
+		loginURL := fmt.Sprintf("%s/apis/web/v1/login", host())
+		loginReq, _ := http.NewRequest("POST", loginURL, strings.NewReader("username=test&password=testuser123"))
+		loginReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		loginResp, err := client.Do(loginReq)
+		if err != nil {
+			t.Fatalf("Failed to login: %v", err)
+		}
+		loginResp.Body.Close()
+
+		// Extract session cookie
+		var sessionCookie *http.Cookie
+		for _, c := range loginResp.Cookies() {
+			if c.Name == "koito_session" {
+				sessionCookie = c
+				break
+			}
+		}
+		if sessionCookie == nil {
+			t.Fatal("No session cookie in login response")
+		}
+
+		// Make authenticated request to protected endpoint
+		statsURL := fmt.Sprintf("%s/apis/web/v1/stats", host())
+		statsReq, _ := http.NewRequest("GET", statsURL, nil)
+		statsReq.AddCookie(sessionCookie)
+		statsResp, err := client.Do(statsReq)
+		if err != nil {
+			t.Fatalf("Failed to make stats request: %v", err)
+		}
+		defer statsResp.Body.Close()
+
+		if statsResp.StatusCode != http.StatusOK {
+			t.Errorf("expected 200, got %d", statsResp.StatusCode)
+		}
+	})
 }
