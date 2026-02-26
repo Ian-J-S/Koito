@@ -6,9 +6,14 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/gabehf/koito/engine/middleware"
 	"github.com/gabehf/koito/internal/models"
+	"github.com/gabehf/koito/internal/db"
+	"github.com/google/uuid"
 )
 
 // Focused, small test set that avoids needing a full db.DB mock.
@@ -97,4 +102,86 @@ func TestGetTrackHandler_InvalidID_Returns400(t *testing.T) {
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for invalid id, got %d", rr.Code)
 	}
+}
+
+func TestGetArtistHandler_Success(t *testing.T) {
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/artist?id=5", nil)
+
+	mock := artistStoreMock{}
+	http.HandlerFunc(GetArtistHandler(mock)).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "Test Artist") {
+		t.Fatalf("expected body to contain artist name, got %s", rr.Body.String())
+	}
+}
+
+func TestGetTrackHandler_Success(t *testing.T) {
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/track?id=7", nil)
+
+	mock := trackStoreMock{}
+	http.HandlerFunc(GetTrackHandler(mock)).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "Test Track") {
+		t.Fatalf("expected body to contain track title, got %s", rr.Body.String())
+	}
+}
+
+func TestLoginHandler_Success(t *testing.T) {
+	// prepare hashed password
+	pass := []byte("secretpass")
+	hashed, _ := bcrypt.GenerateFromPassword(pass, bcrypt.DefaultCost)
+
+	store := &loginStoreMock{user: &models.User{ID: 3, Username: "bob", Password: hashed}}
+
+	form := "username=bob&password=secretpass"
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	LoginHandler(store).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", rr.Code)
+	}
+	// cookie set
+	found := false
+	for _, c := range rr.Result().Cookies() {
+		if c.Name == "koito_session" && c.Value != "" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected koito_session cookie to be set")
+	}
+}
+
+// --- minimal mocks ---
+
+type artistStoreMock struct{}
+func (artistStoreMock) GetArtist(ctx context.Context, opts db.GetArtistOpts) (*models.Artist, error) {
+	return &models.Artist{ID: opts.ID, Name: "Test Artist"}, nil
+}
+
+type trackStoreMock struct{}
+func (trackStoreMock) GetTrack(ctx context.Context, opts db.GetTrackOpts) (*models.Track, error) {
+	return &models.Track{ID: opts.ID, Title: "Test Track"}, nil
+}
+
+type loginStoreMock struct{ user *models.User }
+func (l *loginStoreMock) GetUserByUsername(ctx context.Context, username string) (*models.User, error) {
+	if l.user != nil && l.user.Username == username {
+		return l.user, nil
+	}
+	return nil, nil
+}
+func (l *loginStoreMock) SaveSession(ctx context.Context, userId int32, expiresAt time.Time, persistent bool) (*models.Session, error) {
+	return &models.Session{ID: uuid.New(), UserID: userId, ExpiresAt: expiresAt, Persistent: persistent}, nil
 }
