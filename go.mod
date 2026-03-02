@@ -1,6 +1,6 @@
 module github.com/gabehf/koito
 
-go 1.24
+go 1.24.0
 
 require (
 	github.com/go-chi/chi/v5 v5.2.1
@@ -17,8 +17,10 @@ require (
 )
 
 require (
+	github.com/go-chi/httprate v0.15.0
 	github.com/gosimple/unidecode v1.0.1
 	golang.org/x/crypto v0.38.0
+	golang.org/x/image v0.33.0
 )
 
 require (
@@ -33,7 +35,6 @@ require (
 	github.com/docker/docker v28.1.1+incompatible // indirect
 	github.com/docker/go-connections v0.5.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
-	github.com/go-chi/httprate v0.15.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.2.1 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510 // indirect
@@ -60,7 +61,6 @@ require (
 	github.com/xeipuuv/gojsonschema v1.2.0 // indirect
 	github.com/zeebo/xxh3 v1.0.2 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/image v0.33.0 // indirect
 	golang.org/x/sys v0.33.0 // indirect
 	golang.org/x/text v0.31.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
