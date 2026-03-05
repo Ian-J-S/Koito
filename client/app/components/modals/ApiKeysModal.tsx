@@ -32,7 +32,7 @@ export default function ApiKeysModal() {
       }
     }, 0);
   };
-
+  //gets API
   const { isPending, isError, data, error } = useQuery({
     queryKey: ["api-keys"],
     queryFn: () => {
@@ -45,10 +45,11 @@ export default function ApiKeysModal() {
       setDisplayData(data);
     }
   }, [data]);
-
+  //takes care of error and everything API request fails
   if (isError) {
     return <p className="error">Error: {error.message}</p>;
   }
+  //Display loading text
   if (isPending) {
     return <p>Loading...</p>;
   }
@@ -77,14 +78,14 @@ export default function ApiKeysModal() {
   const fallbackCopy = (text: string) => {
     const textarea = document.createElement("textarea");
     textarea.value = text;
-    textarea.style.position = "fixed"; // prevent scroll to bottom
+    textarea.style.position = "fixed"; 
     document.body.appendChild(textarea);
     textarea.focus();
     textarea.select();
     try {
       document.execCommand("copy");
     } catch (err) {
-      console.error("Fallback: Copy failed", err);
+      console.error("Copy failed", err);
     }
     document.body.removeChild(textarea);
   };
@@ -92,7 +93,7 @@ export default function ApiKeysModal() {
   const handleCreateApiKey = () => {
     setError(undefined);
     if (input === "") {
-      setError("a label must be provided");
+      setError("Need a label");
       return;
     }
     setLoading(true);
@@ -104,7 +105,7 @@ export default function ApiKeysModal() {
       .catch((err) => setError(err.message));
     setLoading(false);
   };
-
+  // delete keys 
   const handleDeleteApiKey = (id: number) => {
     setError(undefined);
     setLoading(true);
@@ -134,11 +135,9 @@ export default function ApiKeysModal() {
                 expandedKey === v.key ? "" : "truncate"
               }`}
               style={{ whiteSpace: "nowrap" }}
-              title={v.key} // optional tooltip
+              title={v.key}
             >
-              {expandedKey === v.key
-                ? v.key
-                : `${v.key.slice(0, 8)}... ${v.label}`}
+              {expandedKey === v.key ? v.key : `${v.key.slice(0, 8)}... ${v.label}`}
             </div>
             <button
               onClick={(e) => handleCopy(e, v.key)}
@@ -158,7 +157,7 @@ export default function ApiKeysModal() {
         <div className="flex gap-2 w-3/5">
           <input
             type="text"
-            placeholder="Add a label for a new API key"
+            placeholder="need label for API key"
             className="mx-auto fg bg rounded-md p-3 flex-grow"
             value={input}
             onChange={(e) => setInput(e.target.value)}
