@@ -59,78 +59,59 @@ func TestMeHandler_Success(t *testing.T) {
 	}
 }
 
-func TestGetArtistHandler_MissingID_Returns400(t *testing.T) {
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/artist", nil)
-
-	// Handler will validate query param before touching the store; pass nil
-	http.HandlerFunc(GetArtistHandler(nil)).ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d", rr.Code)
+func assertStatusAndContains(t *testing.T, rr *httptest.ResponseRecorder, code int, contains string) {
+	t.Helper()
+	if rr.Code != code {
+		t.Fatalf("expected %d, got %d", code, rr.Code)
+	}
+	if contains != "" && !strings.Contains(rr.Body.String(), contains) {
+		t.Fatalf("expected body to contain %q, got %s", contains, rr.Body.String())
 	}
 }
 
-func TestGetArtistHandler_InvalidID_Returns400(t *testing.T) {
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/artist?id=abc", nil)
+func TestGetArtistHandler(t *testing.T) {
+	tests := []struct {
+		name            string
+		url             string
+		store           ArtistStore
+		expectedCode    int
+		expectedContain string
+	}{
+		{"MissingID", "/artist", nil, http.StatusBadRequest, ""},
+		{"InvalidID", "/artist?id=abc", nil, http.StatusBadRequest, ""},
+		{"Success", "/artist?id=5", artistStoreMock{}, http.StatusOK, "Test Artist"},
+	}
 
-	http.HandlerFunc(GetArtistHandler(nil)).ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for invalid id, got %d", rr.Code)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rr := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, tc.url, nil)
+			http.HandlerFunc(GetArtistHandler(tc.store)).ServeHTTP(rr, req)
+			assertStatusAndContains(t, rr, tc.expectedCode, tc.expectedContain)
+		})
 	}
 }
 
-func TestGetTrackHandler_MissingID_Returns400(t *testing.T) {
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/track", nil)
-
-	http.HandlerFunc(GetTrackHandler(nil)).ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d", rr.Code)
+func TestGetTrackHandler(t *testing.T) {
+	tests := []struct {
+		name            string
+		url             string
+		store           TrackStore
+		expectedCode    int
+		expectedContain string
+	}{
+		{"MissingID", "/track", nil, http.StatusBadRequest, ""},
+		{"InvalidID", "/track?id=xyz", nil, http.StatusBadRequest, ""},
+		{"Success", "/track?id=7", trackStoreMock{}, http.StatusOK, "Test Track"},
 	}
-}
 
-func TestGetTrackHandler_InvalidID_Returns400(t *testing.T) {
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/track?id=xyz", nil)
-
-	http.HandlerFunc(GetTrackHandler(nil)).ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for invalid id, got %d", rr.Code)
-	}
-}
-
-func TestGetArtistHandler_Success(t *testing.T) {
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/artist?id=5", nil)
-
-	mock := artistStoreMock{}
-	http.HandlerFunc(GetArtistHandler(mock)).ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rr.Code)
-	}
-	if !strings.Contains(rr.Body.String(), "Test Artist") {
-		t.Fatalf("expected body to contain artist name, got %s", rr.Body.String())
-	}
-}
-
-func TestGetTrackHandler_Success(t *testing.T) {
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/track?id=7", nil)
-
-	mock := trackStoreMock{}
-	http.HandlerFunc(GetTrackHandler(mock)).ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rr.Code)
-	}
-	if !strings.Contains(rr.Body.String(), "Test Track") {
-		t.Fatalf("expected body to contain track title, got %s", rr.Body.String())
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rr := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, tc.url, nil)
+			http.HandlerFunc(GetTrackHandler(tc.store)).ServeHTTP(rr, req)
+			assertStatusAndContains(t, rr, tc.expectedCode, tc.expectedContain)
+		})
 	}
 }
 
