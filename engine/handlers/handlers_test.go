@@ -11,8 +11,8 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/gabehf/koito/engine/middleware"
-	"github.com/gabehf/koito/internal/models"
 	"github.com/gabehf/koito/internal/db"
+	"github.com/gabehf/koito/internal/models"
 	"github.com/google/uuid"
 )
 
@@ -166,16 +166,19 @@ func TestLoginHandler_Success(t *testing.T) {
 // --- minimal mocks ---
 
 type artistStoreMock struct{}
+
 func (artistStoreMock) GetArtist(ctx context.Context, opts db.GetArtistOpts) (*models.Artist, error) {
 	return &models.Artist{ID: opts.ID, Name: "Test Artist"}, nil
 }
 
 type trackStoreMock struct{}
+
 func (trackStoreMock) GetTrack(ctx context.Context, opts db.GetTrackOpts) (*models.Track, error) {
 	return &models.Track{ID: opts.ID, Title: "Test Track"}, nil
 }
 
 type loginStoreMock struct{ user *models.User }
+
 func (l *loginStoreMock) GetUserByUsername(ctx context.Context, username string) (*models.User, error) {
 	if l.user != nil && l.user.Username == username {
 		return l.user, nil
@@ -184,4 +187,70 @@ func (l *loginStoreMock) GetUserByUsername(ctx context.Context, username string)
 }
 func (l *loginStoreMock) SaveSession(ctx context.Context, userId int32, expiresAt time.Time, persistent bool) (*models.Session, error) {
 	return &models.Session{ID: uuid.New(), UserID: userId, ExpiresAt: expiresAt, Persistent: persistent}, nil
+}
+
+// --- alias tests ---
+
+func TestGetAliasesHandler_MissingAllIDs_Returns400(t *testing.T) {
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/aliases", nil)
+
+	GetAliasesHandler(nil).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "must be provided") {
+		t.Fatalf("expected error message about missing IDs, got %s", rr.Body.String())
+	}
+}
+
+func TestGetAliasesHandler_InvalidArtistID_Returns400(t *testing.T) {
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/aliases?artist_id=invalid", nil)
+
+	GetAliasesHandler(nil).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "invalid") {
+		t.Fatalf("expected error message about invalid ID, got %s", rr.Body.String())
+	}
+}
+
+func TestGetAliasesHandler_InvalidAlbumID_Returns400(t *testing.T) {
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/aliases?album_id=notanumber", nil)
+
+	GetAliasesHandler(nil).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rr.Code)
+	}
+}
+
+func TestGetAliasesHandler_InvalidTrackID_Returns400(t *testing.T) {
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/aliases?track_id=xyz", nil)
+
+	GetAliasesHandler(nil).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rr.Code)
+	}
+}
+
+func TestGetAliasesHandler_MultipleIDs_Returns400(t *testing.T) {
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/aliases?artist_id=1&album_id=2", nil)
+
+	GetAliasesHandler(nil).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "only one") {
+		t.Fatalf("expected error message about multiple IDs, got %s", rr.Body.String())
+	}
 }

@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -10,7 +12,66 @@ import (
 	"github.com/gabehf/koito/internal/utils"
 )
 
-// GetAliasesHandler retrieves all aliases for a given artist or album ID.
+// entityType represents the type of entity (artist, album, or track).
+type entityType int
+
+const (
+	entityArtist entityType = iota
+	entityAlbum
+	entityTrack
+)
+
+// parseIDParams extracts and validates ID parameters from query string.
+// Returns the entity type, ID value, and an error message if validation fails.
+func parseIDParams(artistIDStr, albumIDStr, trackIDStr string) (entityType, int32, string, error) {
+	// Check if at least one ID is provided
+	if artistIDStr == "" && albumIDStr == "" && trackIDStr == "" {
+		return 0, 0, "artist_id, album_id, or track_id must be provided", errors.New("missing id parameters")
+	}
+
+	// Check if only one ID is provided
+	if utils.MoreThanOneString(artistIDStr, albumIDStr, trackIDStr) {
+		return 0, 0, "only one of artist_id, album_id, or track_id can be provided at a time", errors.New("multiple id parameters")
+	}
+
+	if artistIDStr != "" {
+		id, err := strconv.Atoi(artistIDStr)
+		if err != nil {
+			return 0, 0, "invalid artist_id", errors.New("invalid artist_id")
+		}
+		return entityArtist, int32(id), "", nil
+	}
+
+	if albumIDStr != "" {
+		id, err := strconv.Atoi(albumIDStr)
+		if err != nil {
+			return 0, 0, "invalid album_id", errors.New("invalid album_id")
+		}
+		return entityAlbum, int32(id), "", nil
+	}
+
+	id, err := strconv.Atoi(trackIDStr)
+	if err != nil {
+		return 0, 0, "invalid track_id", errors.New("invalid track_id")
+	}
+	return entityTrack, int32(id), "", nil
+}
+
+// fetchAliases retrieves aliases based on entity type and ID.
+func fetchAliases(ctx context.Context, store db.DB, et entityType, id int32) ([]models.Alias, error) {
+	switch et {
+	case entityArtist:
+		return store.GetAllArtistAliases(ctx, id)
+	case entityAlbum:
+		return store.GetAllAlbumAliases(ctx, id)
+	case entityTrack:
+		return store.GetAllTrackAliases(ctx, id)
+	default:
+		return nil, errors.New("unknown entity type")
+	}
+}
+
+// GetAliasesHandler retrieves all aliases for a given artist, album, or track ID.
 func GetAliasesHandler(store db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
@@ -18,64 +79,25 @@ func GetAliasesHandler(store db.DB) http.HandlerFunc {
 
 		l.Debug().Msgf("GetAliasesHandler: Got request with params: '%s'", r.URL.Query().Encode())
 
-		// Parse query parameters
-		artistIDStr := r.URL.Query().Get("artist_id")
-		albumIDStr := r.URL.Query().Get("album_id")
-		trackIDStr := r.URL.Query().Get("track_id")
+		et, id, msg, err := parseIDParams(
+			r.URL.Query().Get("artist_id"),
+			r.URL.Query().Get("album_id"),
+			r.URL.Query().Get("track_id"),
+		)
 
-		if artistIDStr == "" && albumIDStr == "" && trackIDStr == "" {
-			l.Debug().Msgf("GetAliasesHandler: Request is missing required parameters")
-			utils.WriteError(w, "artist_id, album_id, or track_id must be provided", http.StatusBadRequest)
-			return
-		}
-		if utils.MoreThanOneString(artistIDStr, albumIDStr, trackIDStr) {
-			l.Debug().Msgf("GetAliasesHandler: Request is has more than one of artist_id, album_id, and track_id")
-			utils.WriteError(w, "only one of artist_id, album_id, or track_id can be provided at a time", http.StatusBadRequest)
+		if err != nil {
+			l.Debug().AnErr("error", err).Msg("GetAliasesHandler: Parameter validation failed")
+			utils.WriteError(w, msg, http.StatusBadRequest)
 			return
 		}
 
-		var aliases []models.Alias
-
-		if artistIDStr != "" {
-			artistID, err := strconv.Atoi(artistIDStr)
-			if err != nil {
-				l.Debug().AnErr("error", err).Msg("GetAliasesHandler: Invalid artist id")
-				utils.WriteError(w, "invalid artist_id", http.StatusBadRequest)
-				return
-			}
-			aliases, err = store.GetAllArtistAliases(ctx, int32(artistID))
-			if err != nil {
-				l.Err(err).Msg("GetAliasesHandler: Failed to get artist aliases")
-				utils.WriteError(w, "failed to retrieve aliases", http.StatusInternalServerError)
-				return
-			}
-		} else if albumIDStr != "" {
-			albumID, err := strconv.Atoi(albumIDStr)
-			if err != nil {
-				l.Debug().AnErr("error", err).Msg("GetAliasesHandler: Invalid album id")
-				utils.WriteError(w, "invalid album_id", http.StatusBadRequest)
-				return
-			}
-			aliases, err = store.GetAllAlbumAliases(ctx, int32(albumID))
-			if err != nil {
-				l.Err(err).Msg("GetAliasesHandler: Failed to get album aliases")
-				utils.WriteError(w, "failed to retrieve aliases", http.StatusInternalServerError)
-				return
-			}
-		} else if trackIDStr != "" {
-			trackID, err := strconv.Atoi(trackIDStr)
-			if err != nil {
-				l.Debug().AnErr("error", err).Msg("GetAliasesHandler: Invalid track id")
-				utils.WriteError(w, "invalid track_id", http.StatusBadRequest)
-				return
-			}
-			aliases, err = store.GetAllTrackAliases(ctx, int32(trackID))
-			if err != nil {
-				l.Err(err).Msg("GetAliasesHandler: Failed to get track aliases")
-				utils.WriteError(w, "failed to retrieve aliases", http.StatusInternalServerError)
-				return
-			}
+		aliases, err := fetchAliases(ctx, store, et, id)
+		if err != nil {
+			l.Err(err).Msg("GetAliasesHandler: Failed to retrieve aliases")
+			utils.WriteError(w, "failed to retrieve aliases", http.StatusInternalServerError)
+			return
 		}
+
 		utils.WriteJSON(w, http.StatusOK, aliases)
 	}
 }
