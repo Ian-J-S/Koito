@@ -37,7 +37,7 @@ func Run(
 ) error {
 	err := cfg.Load(getenv, version)
 	if err != nil {
-		panic("Engine: Failed to load configuration")
+		return fmt.Errorf("Engine: failed to load configuration: %w", err)
 	}
 
 	l := logger.Get()
@@ -68,7 +68,7 @@ func Run(
 		l.Info().Msgf("Engine: Creating config directory: %s", cfg.ConfigDir())
 		err = os.MkdirAll(cfg.ConfigDir(), 0744)
 		if err != nil {
-			l.Fatal().Err(err).Msg("Engine: Failed to create config directory")
+			l.Error().Err(err).Msg("Engine: Failed to create config directory")
 			return err
 		}
 	}
@@ -80,7 +80,7 @@ func Run(
 		l.Info().Msgf("Engine: Creating import directory: %s", path.Join(cfg.ConfigDir(), "import"))
 		err = os.Mkdir(path.Join(cfg.ConfigDir(), "import"), 0744)
 		if err != nil {
-			l.Fatal().Err(err).Msg("Engine: Failed to create import directory")
+			l.Error().Err(err).Msg("Engine: Failed to create import directory")
 			return err
 		}
 	}
@@ -116,23 +116,25 @@ func Run(
 
 		resp, err := http.Get(pingURL)
 		if err != nil {
-			l.Fatal().Err(err).Msg("Engine: Failed to contact Subsonic server! Ensure the provided URL is correct")
+			l.Error().Err(err).Msg("Engine: Failed to contact Subsonic server! Ensure the provided URL is correct")
+			return err
+		}
+		defer resp.Body.Close()
+
+		var result struct {
+			Response struct {
+				Status string `json:"status"`
+			} `json:"subsonic-response"`
+		}
+
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			l.Error().Err(err).Msg("Engine: Failed to parse Subsonic response")
+			return err
+		} else if result.Response.Status != "ok" {
+			l.Error().Msg("Engine: Provided Subsonic credentials are invalid")
+			return fmt.Errorf("Engine: invalid Subsonic credentials")
 		} else {
-			defer resp.Body.Close()
-
-			var result struct {
-				Response struct {
-					Status string `json:"status"`
-				} `json:"subsonic-response"`
-			}
-
-			if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-				l.Fatal().Err(err).Msg("Engine: Failed to parse Subsonic response")
-			} else if result.Response.Status != "ok" {
-				l.Fatal().Msg("Engine: Provided Subsonic credentials are invalid")
-			} else {
-				l.Info().Msg("Engine: Subsonic credentials validated successfully")
-			}
+			l.Info().Msg("Engine: Subsonic credentials validated successfully")
 		}
 	}
 
@@ -156,11 +158,13 @@ func Run(
 			Role:     models.UserRoleAdmin,
 		})
 		if err != nil {
-			l.Fatal().Err(err).Msg("Engine: Failed to save default user in database")
+			l.Error().Err(err).Msg("Engine: Failed to save default user in database")
+			return err
 		}
 		apikey, err := utils.GenerateRandomString(48)
 		if err != nil {
-			l.Fatal().Err(err).Msg("Engine: Failed to generate default API key")
+			l.Error().Err(err).Msg("Engine: Failed to generate default API key")
+			return err
 		}
 		label := "Default"
 		_, err = store.SaveApiKey(ctx, db.SaveApiKeyOpts{
@@ -169,7 +173,8 @@ func Run(
 			Label:  label,
 		})
 		if err != nil {
-			l.Fatal().Err(err).Msg("Engine: Failed to save default API key in database")
+			l.Error().Err(err).Msg("Engine: Failed to save default API key in database")
+			return err
 		}
 		l.Info().Msgf("Engine: Default user created. Login: %s : %s", cfg.DefaultUsername(), cfg.DefaultPassword())
 	}
@@ -201,18 +206,22 @@ func Run(
 	mux.Use(chimiddleware.Recoverer)
 	mux.Use(chimiddleware.RealIP)
 	mux.Use(middleware.AllowedHosts)
-	bindRoutes(mux, &ready, store, mbzC)
+	if err := bindRoutes(mux, &ready, store, mbzC); err != nil {
+		l.Error().Err(err).Msg("Engine: Failed to bind routes")
+		return err
+	}
 
 	httpServer := &http.Server{
 		Addr:    cfg.ListenAddr(),
 		Handler: mux,
 	}
 
+	serverErr := make(chan error, 1)
 	go func() {
 		ready.Store(true)
 		l.Info().Msgf("Engine: Listening on %s", cfg.ListenAddr())
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			l.Fatal().Err(err).Msg("Engine: Error when running ListenAndServe")
+			serverErr <- err
 		}
 	}()
 
@@ -237,19 +246,26 @@ func Run(
 	l.Info().Msg("Engine: Initialization finished")
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-	l.Info().Msg("Engine: Received server shutdown notice")
+
+	var runErr error
+	select {
+	case err := <-serverErr:
+		l.Error().Err(err).Msg("Engine: HTTP server stopped unexpectedly")
+		runErr = err
+	case <-quit:
+		l.Info().Msg("Engine: Received server shutdown notice")
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	l.Info().Msg("Engine: Waiting for all processes to finish")
 	mbzC.Shutdown()
 	if err := httpServer.Shutdown(ctx); err != nil {
-		l.Fatal().Err(err).Msg("Engine: Error during server shutdown")
+		l.Error().Err(err).Msg("Engine: Error during server shutdown")
 		return err
 	}
 	l.Info().Msg("Engine: Shutdown successful")
-	return nil
+	return runErr
 }
 
 func RunImporter(l *zerolog.Logger, store db.DB, mbzc mbz.MusicBrainzCaller) {
