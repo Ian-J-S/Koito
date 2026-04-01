@@ -3,7 +3,6 @@ package handlers
 import (
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/gabehf/koito/internal/catalog"
@@ -28,31 +27,18 @@ func ReplaceImageHandler(store db.DB) http.HandlerFunc {
 
 		l.Debug().Msg("ReplaceImageHandler: Received request to replace image")
 
-		artistIdStr := r.FormValue("artist_id")
-		albumIdStr := r.FormValue("album_id")
-
-		// Parse artistId if provided
-		var artistId int
-		if artistIdStr != "" {
-			var err error
-			artistId, err = strconv.Atoi(artistIdStr)
-			if err != nil {
-				l.Debug().AnErr("error", err).Msg("ReplaceImageHandler: Invalid artist ID")
-				utils.WriteError(w, "invalid artistId", http.StatusBadRequest)
-				return
-			}
+		artistId, err := parseOptionalInt(r.FormValue("artist_id"))
+		if err != nil {
+			l.Debug().AnErr("error", err).Msg("ReplaceImageHandler: Invalid artist ID")
+			utils.WriteError(w, "invalid artistId", http.StatusBadRequest)
+			return
 		}
 
-		// Parse albumId if provided
-		var albumId int
-		if albumIdStr != "" {
-			var err error
-			albumId, err = strconv.Atoi(albumIdStr)
-			if err != nil {
-				l.Debug().AnErr("error", err).Msg("ReplaceImageHandler: Invalid album ID")
-				utils.WriteError(w, "invalid albumId", http.StatusBadRequest)
-				return
-			}
+		albumId, err := parseOptionalInt(r.FormValue("album_id"))
+		if err != nil {
+			l.Debug().AnErr("error", err).Msg("ReplaceImageHandler: Invalid album ID")
+			utils.WriteError(w, "invalid albumId", http.StatusBadRequest)
+			return
 		}
 
 		// Check that exactly one ID is provided
@@ -94,13 +80,11 @@ func ReplaceImageHandler(store db.DB) http.HandlerFunc {
 		l.Debug().Msg("ReplaceImageHandler: Getting image from request")
 
 		var id uuid.UUID
-		var err error
 
 		fileUrl := r.FormValue("image_url")
 		if fileUrl != "" {
 			l.Debug().Msg("ReplaceImageHandler: Image identified as remote file")
-			err = images.ValidateImageURL(fileUrl)
-			if err != nil {
+			if err := images.ValidateImageURL(fileUrl); err != nil {
 				l.Debug().AnErr("error", err).Msg("ReplaceImageHandler: Invalid image URL")
 				utils.WriteError(w, "url is invalid or not an image file", http.StatusBadRequest)
 				return
@@ -113,8 +97,7 @@ func ReplaceImageHandler(store db.DB) http.HandlerFunc {
 				dlSize = catalog.ImageSizeLarge
 			}
 			l.Debug().Msg("ReplaceImageHandler: Downloading album image from source")
-			err = catalog.DownloadAndCacheImage(ctx, id, fileUrl, dlSize)
-			if err != nil {
+			if err := catalog.DownloadAndCacheImage(ctx, id, fileUrl, dlSize); err != nil {
 				l.Err(err).Msg("ReplaceImageHandler: Failed to cache image")
 				utils.WriteError(w, "Failed to cache image", http.StatusInternalServerError)
 				return
@@ -150,7 +133,6 @@ func ReplaceImageHandler(store db.DB) http.HandlerFunc {
 			}
 
 			l.Debug().Msg("ReplaceImageHandler: Saving image to cache")
-
 			id = uuid.New()
 
 			var dlSize catalog.ImageSize
@@ -160,11 +142,7 @@ func ReplaceImageHandler(store db.DB) http.HandlerFunc {
 				dlSize = catalog.ImageSizeLarge
 			}
 
-			err = catalog.CompressAndSaveImage(ctx, id.String(), dlSize, file)
-			if err != nil {
-				l.Err(err).Msg("ReplaceImageHandler: Could not save file")
-				utils.WriteError(w, "Could not save file", http.StatusInternalServerError)
-				return
+			if err := catalog.CompressAndSaveImage(ctx, id.String(), dlSize, file); err != nil {
 			}
 		}
 

@@ -16,6 +16,20 @@ import (
 const defaultLimitSize = 100
 const maximumLimit = 500
 
+func parseOptionalInt(value string) (int, error) {
+	if value == "" {
+		return 0, nil
+	}
+	return strconv.Atoi(value)
+}
+
+func parseOptionalInt64(value string) (int64, error) {
+	if value == "" {
+		return 0, nil
+	}
+	return strconv.ParseInt(value, 10, 64)
+}
+
 func OptsFromRequest(r *http.Request) db.GetItemsOpts {
 	l := logger.FromContext(r.Context())
 
@@ -47,37 +61,22 @@ func OptsFromRequest(r *http.Request) db.GetItemsOpts {
 		page = 1
 	}
 
-	artistIdStr := r.URL.Query().Get("artist_id")
-	artistId := 0
-	if artistIdStr != "" {
-		var err error
-		artistId, err = strconv.Atoi(artistIdStr)
-		if err != nil {
-			l.Debug().Msgf("OptsFromRequest: Invalid artist_id parameter '%s', ignoring filter", artistIdStr)
-			artistId = 0
-		}
+	artistId, err := parseOptionalInt(r.URL.Query().Get("artist_id"))
+	if err != nil {
+		l.Debug().Msgf("OptsFromRequest: Invalid artist_id parameter '%s', ignoring filter", r.URL.Query().Get("artist_id"))
+		artistId = 0
 	}
 
-	albumIdStr := r.URL.Query().Get("album_id")
-	albumId := 0
-	if albumIdStr != "" {
-		var err error
-		albumId, err = strconv.Atoi(albumIdStr)
-		if err != nil {
-			l.Debug().Msgf("OptsFromRequest: Invalid album_id parameter '%s', ignoring filter", albumIdStr)
-			albumId = 0
-		}
+	albumId, err := parseOptionalInt(r.URL.Query().Get("album_id"))
+	if err != nil {
+		l.Debug().Msgf("OptsFromRequest: Invalid album_id parameter '%s', ignoring filter", r.URL.Query().Get("album_id"))
+		albumId = 0
 	}
 
-	trackIdStr := r.URL.Query().Get("track_id")
-	trackId := 0
-	if trackIdStr != "" {
-		var err error
-		trackId, err = strconv.Atoi(trackIdStr)
-		if err != nil {
-			l.Debug().Msgf("OptsFromRequest: Invalid track_id parameter '%s', ignoring filter", trackIdStr)
-			trackId = 0
-		}
+	trackId, err := parseOptionalInt(r.URL.Query().Get("track_id"))
+	if err != nil {
+		l.Debug().Msgf("OptsFromRequest: Invalid track_id parameter '%s', ignoring filter", r.URL.Query().Get("track_id"))
+		trackId = 0
 	}
 
 	tf := TimeframeFromRequest(r)
@@ -113,39 +112,39 @@ func TimeframeFromRequest(r *http.Request) db.Timeframe {
 	l := logger.FromContext(r.Context())
 	q := r.URL.Query()
 
-	parseInt := func(key string) int {
-		v := q.Get(key)
-		if v == "" {
-			return 0
-		}
-		i, err := strconv.Atoi(v)
-		if err != nil {
-			l.Debug().Msgf("TimeframeFromRequest: Invalid %s parameter '%s', ignoring", key, v)
-			return 0
-		}
-		return i
+	year, err := parseOptionalInt(q.Get("year"))
+	if err != nil {
+		l.Debug().Msgf("TimeframeFromRequest: Invalid year parameter '%s', ignoring", q.Get("year"))
+		year = 0
 	}
-
-	parseInt64 := func(key string) int64 {
-		v := q.Get(key)
-		if v == "" {
-			return 0
-		}
-		i, err := strconv.ParseInt(v, 10, 64)
-		if err != nil {
-			l.Debug().Msgf("TimeframeFromRequest: Invalid %s parameter '%s', ignoring", key, v)
-			return 0
-		}
-		return i
+	month, err := parseOptionalInt(q.Get("month"))
+	if err != nil {
+		l.Debug().Msgf("TimeframeFromRequest: Invalid month parameter '%s', ignoring", q.Get("month"))
+		month = 0
+	}
+	week, err := parseOptionalInt(q.Get("week"))
+	if err != nil {
+		l.Debug().Msgf("TimeframeFromRequest: Invalid week parameter '%s', ignoring", q.Get("week"))
+		week = 0
+	}
+	fromUnix, err := parseOptionalInt64(q.Get("from"))
+	if err != nil {
+		l.Debug().Msgf("TimeframeFromRequest: Invalid from parameter '%s', ignoring", q.Get("from"))
+		fromUnix = 0
+	}
+	toUnix, err := parseOptionalInt64(q.Get("to"))
+	if err != nil {
+		l.Debug().Msgf("TimeframeFromRequest: Invalid to parameter '%s', ignoring", q.Get("to"))
+		toUnix = 0
 	}
 
 	return db.Timeframe{
 		Period:   db.Period(q.Get("period")),
-		Year:     parseInt("year"),
-		Month:    parseInt("month"),
-		Week:     parseInt("week"),
-		FromUnix: parseInt64("from"),
-		ToUnix:   parseInt64("to"),
+		Year:     year,
+		Month:    month,
+		Week:     week,
+		FromUnix: fromUnix,
+		ToUnix:   toUnix,
 		Timezone: parseTZ(r),
 	}
 }
