@@ -11,8 +11,8 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/gabehf/koito/engine/middleware"
-	"github.com/gabehf/koito/internal/models"
 	"github.com/gabehf/koito/internal/db"
+	"github.com/gabehf/koito/internal/models"
 	"github.com/google/uuid"
 )
 
@@ -166,16 +166,19 @@ func TestLoginHandler_Success(t *testing.T) {
 // --- minimal mocks ---
 
 type artistStoreMock struct{}
+
 func (artistStoreMock) GetArtist(ctx context.Context, opts db.GetArtistOpts) (*models.Artist, error) {
 	return &models.Artist{ID: opts.ID, Name: "Test Artist"}, nil
 }
 
 type trackStoreMock struct{}
+
 func (trackStoreMock) GetTrack(ctx context.Context, opts db.GetTrackOpts) (*models.Track, error) {
 	return &models.Track{ID: opts.ID, Title: "Test Track"}, nil
 }
 
 type loginStoreMock struct{ user *models.User }
+
 func (l *loginStoreMock) GetUserByUsername(ctx context.Context, username string) (*models.User, error) {
 	if l.user != nil && l.user.Username == username {
 		return l.user, nil
@@ -184,4 +187,52 @@ func (l *loginStoreMock) GetUserByUsername(ctx context.Context, username string)
 }
 func (l *loginStoreMock) SaveSession(ctx context.Context, userId int32, expiresAt time.Time, persistent bool) (*models.Session, error) {
 	return &models.Session{ID: uuid.New(), UserID: userId, ExpiresAt: expiresAt, Persistent: persistent}, nil
+}
+
+func TestReplaceImageHandler_InvalidArtistId_Returns400(t *testing.T) {
+	rr := httptest.NewRecorder()
+	form := "artist_id=abc"
+	req := httptest.NewRequest(http.MethodPost, "/replace-image", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	ReplaceImageHandler(nil).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid artistId, got %d", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "invalid artistId") {
+		t.Fatalf("expected response to contain 'invalid artistId', got %s", rr.Body.String())
+	}
+}
+
+func TestReplaceImageHandler_InvalidAlbumId_Returns400(t *testing.T) {
+	rr := httptest.NewRecorder()
+	form := "album_id=xyz"
+	req := httptest.NewRequest(http.MethodPost, "/replace-image", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	ReplaceImageHandler(nil).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid albumId, got %d", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "invalid albumId") {
+		t.Fatalf("expected response to contain 'invalid albumId', got %s", rr.Body.String())
+	}
+}
+
+func TestReplaceImageHandler_MissingBothIds_Returns400(t *testing.T) {
+	rr := httptest.NewRecorder()
+	form := "image_url=http://example.com/image.jpg"
+	req := httptest.NewRequest(http.MethodPost, "/replace-image", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	ReplaceImageHandler(nil).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 when both IDs are missing, got %d", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "artistId or albumId required") {
+		t.Fatalf("expected response to contain 'artistId or albumId required', got %s", rr.Body.String())
+	}
 }

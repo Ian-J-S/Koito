@@ -29,17 +29,40 @@ func ReplaceImageHandler(store db.DB) http.HandlerFunc {
 		l.Debug().Msg("ReplaceImageHandler: Received request to replace image")
 
 		artistIdStr := r.FormValue("artist_id")
-		artistId, _ := strconv.Atoi(artistIdStr)
 		albumIdStr := r.FormValue("album_id")
-		albumId, _ := strconv.Atoi(albumIdStr)
 
+		// Parse artistId if provided
+		var artistId int
+		if artistIdStr != "" {
+			var err error
+			artistId, err = strconv.Atoi(artistIdStr)
+			if err != nil {
+				l.Debug().AnErr("error", err).Msg("ReplaceImageHandler: Invalid artist ID")
+				utils.WriteError(w, "invalid artistId", http.StatusBadRequest)
+				return
+			}
+		}
+
+		// Parse albumId if provided
+		var albumId int
+		if albumIdStr != "" {
+			var err error
+			albumId, err = strconv.Atoi(albumIdStr)
+			if err != nil {
+				l.Debug().AnErr("error", err).Msg("ReplaceImageHandler: Invalid album ID")
+				utils.WriteError(w, "invalid albumId", http.StatusBadRequest)
+				return
+			}
+		}
+
+		// Check that exactly one ID is provided
 		if artistId != 0 && albumId != 0 {
 			l.Debug().Msg("ReplaceImageHandler: Both artist_id and album_id are set, rejecting request")
 			utils.WriteError(w, "Only one of artist_id and album_id can be set", http.StatusBadRequest)
 			return
 		} else if artistId == 0 && albumId == 0 {
 			l.Debug().Msg("ReplaceImageHandler: Neither artist_id nor album_id are set, rejecting request")
-			utils.WriteError(w, "One of artist_id and album_id must be set", http.StatusBadRequest)
+			utils.WriteError(w, "artistId or albumId required", http.StatusBadRequest)
 			return
 		}
 
