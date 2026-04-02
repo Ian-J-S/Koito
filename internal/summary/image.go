@@ -27,6 +27,14 @@ var (
 	featureTextStart  = paddingLg + paddingMd + featuredImageSize
 )
 
+type addTextOpts struct {
+	Text     string
+	Subtext  string
+	Point    image.Point
+	FontFile string
+	FontSize float64
+}
+
 // lots of code borrowed from https://medium.com/@daniel.ruizcamacho/how-to-create-an-image-in-golang-step-by-step-4416affe088f
 // func GenerateImage(summary *Summary) error {
 // 	base := image.NewRGBA(image.Rect(0, 0, 750, 1100))
@@ -110,7 +118,13 @@ func addImage(baseImage *image.RGBA, path string, point image.Point, height int)
 	return nil
 }
 
-func addText(baseImage *image.RGBA, text, subtext string, point image.Point, fontFile string, fontSize float64) error {
+func addText(baseImage *image.RGBA, opts addTextOpts) error {
+	text := opts.Text
+	subtext := opts.Subtext
+	point := opts.Point
+	fontFile := opts.FontFile
+	fontSize := opts.FontSize
+
 	fontBytes, err := os.ReadFile(fontFile)
 	if err != nil {
 		return err
