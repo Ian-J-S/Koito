@@ -90,34 +90,45 @@ export default function ApiKeysModal() {
     document.body.removeChild(textarea);
   };
 
-  const handleCreateApiKey = () => {
-    setError(undefined);
-    if (input === "") {
-      setError("Need a label");
-      return;
+const handleCreateApiKey = async () => {
+  if (loading) return;
+
+  setError(undefined);
+  if (input === "") {
+    setError("Need a label");
+    return;
+  }
+
+  setLoading(true);
+  try {
+    const r = await createApiKey(input);
+    setDisplayData((prev) => [r, ...prev]);
+    setInput("");
+  } catch (err: any) {
+    setError(err.message);
+  } finally {
+    setLoading(false);
+  }
+};
+
+// delete keys
+const handleDeleteApiKey = async (id: number) => {
+  if (loading) return;
+
+  setError(undefined);
+  setLoading(true);
+  try {
+    const r = await deleteApiKey(id);
+    if (r.ok) {
+      setDisplayData((prev) => prev.filter((v) => v.id !== id));
+    } else {
+      const errData = await r.json();
+      setError(errData.error);
     }
-    setLoading(true);
-    createApiKey(input)
-      .then((r) => {
-        setDisplayData([r, ...displayData]);
-        setInput("");
-      })
-      .catch((err) => setError(err.message));
+  } finally {
     setLoading(false);
-  };
-  // delete keys 
-  const handleDeleteApiKey = (id: number) => {
-    setError(undefined);
-    setLoading(true);
-    deleteApiKey(id).then((r) => {
-      if (r.ok) {
-        setDisplayData(displayData.filter((v) => v.id != id));
-      } else {
-        r.json().then((r) => setError(r.error));
-      }
-    });
-    setLoading(false);
-  };
+  }
+};
 
   return (
     <div className="">
