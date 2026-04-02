@@ -82,40 +82,36 @@ func (d *Psql) SaveArtistAliases(ctx context.Context, id int32, aliases []string
 	if id == 0 {
 		return errors.New("SaveArtistAliases: artist id not specified")
 	}
-	tx, err := d.conn.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		l.Err(err).Msg("Failed to begin transaction")
-		return fmt.Errorf("SaveArtistAliases: BeginTx: %w", err)
-	}
-	defer tx.Rollback(ctx)
-	qtx := d.q.WithTx(tx)
-	l.Debug().Msgf("Fetching existing artist aliases for artist %d...", id)
-	existing, err := qtx.GetAllArtistAliases(ctx, id)
-	if err != nil {
-		return fmt.Errorf("SaveArtistAliases: GetAllArtistAliases: %w", err)
-	}
-	for _, v := range existing {
-		aliases = append(aliases, v.Alias)
-	}
-	l.Debug().Msgf("Ensuring aliases are unique...")
-	utils.Unique(&aliases)
-	for _, alias := range aliases {
-		l.Debug().Msgf("Inserting alias %s for artist with id %d", alias, id)
-		alias = strings.TrimSpace(alias)
-		if alias == "" {
-			return errors.New("SaveArtistAliases: aliases cannot be blank")
-		}
-		err = qtx.InsertArtistAlias(ctx, repository.InsertArtistAliasParams{
-			Alias:     alias,
-			ArtistID:  id,
-			Source:    source,
-			IsPrimary: false,
-		})
+
+	return d.withTx(ctx, "SaveArtistAliases", func(qtx *repository.Queries) error {
+		l.Debug().Msgf("Fetching existing artist aliases for artist %d...", id)
+		existing, err := qtx.GetAllArtistAliases(ctx, id)
 		if err != nil {
-			return fmt.Errorf("SaveArtistAliases: InsertArtistAlias: %w", err)
+			return fmt.Errorf("SaveArtistAliases: GetAllArtistAliases: %w", err)
 		}
-	}
-	return tx.Commit(ctx)
+		for _, v := range existing {
+			aliases = append(aliases, v.Alias)
+		}
+		l.Debug().Msgf("Ensuring aliases are unique...")
+		utils.Unique(&aliases)
+		for _, alias := range aliases {
+			l.Debug().Msgf("Inserting alias %s for artist with id %d", alias, id)
+			alias = strings.TrimSpace(alias)
+			if alias == "" {
+				return errors.New("SaveArtistAliases: aliases cannot be blank")
+			}
+			err = qtx.InsertArtistAlias(ctx, repository.InsertArtistAliasParams{
+				Alias:     alias,
+				ArtistID:  id,
+				Source:    source,
+				IsPrimary: false,
+			})
+			if err != nil {
+				return fmt.Errorf("SaveArtistAliases: InsertArtistAlias: %w", err)
+			}
+		}
+		return nil
+	})
 }
 
 func (d *Psql) DeleteArtist(ctx context.Context, id int32) error {
@@ -133,52 +129,47 @@ func (d *Psql) SaveArtist(ctx context.Context, opts db.SaveArtistOpts) (*models.
 	if opts.Image != uuid.Nil {
 		insertImage = &opts.Image
 	}
-	tx, err := d.conn.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		l.Err(err).Msg("Failed to begin transaction")
-		return nil, fmt.Errorf("SaveArtist: BeginTx: %w", err)
-	}
-	defer tx.Rollback(ctx)
-	qtx := d.q.WithTx(tx)
 	opts.Name = strings.TrimSpace(opts.Name)
 	if opts.Name == "" {
 		return nil, errors.New("SaveArtist: name must not be blank")
 	}
-	l.Debug().Msgf("Inserting artist '%s' into DB", opts.Name)
-	a, err := qtx.InsertArtist(ctx, repository.InsertArtistParams{
-		MusicBrainzID: insertMbzID,
-		Image:         insertImage,
-		ImageSource:   pgtype.Text{String: opts.ImageSrc, Valid: opts.ImageSrc != ""},
+
+	artist, err := withTxResult(ctx, d, "SaveArtist", func(qtx *repository.Queries) (*models.Artist, error) {
+		l.Debug().Msgf("Inserting artist '%s' into DB", opts.Name)
+		a, err := qtx.InsertArtist(ctx, repository.InsertArtistParams{
+			MusicBrainzID: insertMbzID,
+			Image:         insertImage,
+			ImageSource:   pgtype.Text{String: opts.ImageSrc, Valid: opts.ImageSrc != ""},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("SaveArtist: InsertArtist: %w", err)
+		}
+		l.Debug().Msgf("Inserting canonical alias '%s' into DB for artist with id %d", opts.Name, a.ID)
+		err = qtx.InsertArtistAlias(ctx, repository.InsertArtistAliasParams{
+			ArtistID:  a.ID,
+			Alias:     opts.Name,
+			Source:    "Canonical",
+			IsPrimary: true,
+		})
+		if err != nil {
+			l.Err(err).Msgf("SaveArtist: error inserting canonical alias for artist '%s'", opts.Name)
+			return nil, fmt.Errorf("SaveArtist: InsertArtistAlias: %w", err)
+		}
+		return &models.Artist{
+			ID:      a.ID,
+			Name:    opts.Name,
+			Image:   a.Image,
+			MbzID:   a.MusicBrainzID,
+			Aliases: []string{opts.Name},
+		}, nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("SaveArtist: InsertArtist: %w", err)
+		return nil, err
 	}
-	l.Debug().Msgf("Inserting canonical alias '%s' into DB for artist with id %d", opts.Name, a.ID)
-	err = qtx.InsertArtistAlias(ctx, repository.InsertArtistAliasParams{
-		ArtistID:  a.ID,
-		Alias:     opts.Name,
-		Source:    "Canonical",
-		IsPrimary: true,
-	})
-	if err != nil {
-		l.Err(err).Msgf("SaveArtist: error inserting canonical alias for artist '%s'", opts.Name)
-		return nil, fmt.Errorf("SaveArtist: InsertArtistAlias: %w", err)
-	}
-	err = tx.Commit(ctx)
-	if err != nil {
-		l.Err(err).Msg("Failed to commit insert artist transaction")
-		return nil, fmt.Errorf("SaveArtist: Commit: %w", err)
-	}
-	artist := &models.Artist{
-		ID:      a.ID,
-		Name:    opts.Name,
-		Image:   a.Image,
-		MbzID:   a.MusicBrainzID,
-		Aliases: []string{opts.Name},
-	}
+
 	if len(opts.Aliases) > 0 {
 		l.Debug().Msgf("Inserting aliases '%v' into DB for artist '%s'", opts.Aliases, opts.Name)
-		err = d.SaveArtistAliases(ctx, a.ID, opts.Aliases, "MusicBrainz")
+		err = d.SaveArtistAliases(ctx, artist.ID, opts.Aliases, "MusicBrainz")
 		if err != nil {
 			return nil, fmt.Errorf("SaveArtist: SaveArtistAliases: %w", err)
 		}
@@ -192,43 +183,34 @@ func (d *Psql) UpdateArtist(ctx context.Context, opts db.UpdateArtistOpts) error
 	if opts.ID == 0 {
 		return errors.New("UpdateArtist: artist id not specified")
 	}
-	tx, err := d.conn.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		l.Err(err).Msg("Failed to begin transaction")
-		return fmt.Errorf("UpdateArtist: BeginTx: %w", err)
-	}
-	defer tx.Rollback(ctx)
-	qtx := d.q.WithTx(tx)
-	if opts.MusicBrainzID != uuid.Nil {
-		l.Debug().Msgf("Updating artist with id %d with MusicBrainz ID %s", opts.ID, opts.MusicBrainzID)
-		err := qtx.UpdateArtistMbzID(ctx, repository.UpdateArtistMbzIDParams{
-			ID:            opts.ID,
-			MusicBrainzID: &opts.MusicBrainzID,
-		})
-		if err != nil {
-			return fmt.Errorf("UpdateArtist: UpdateArtistMbzID: %w", err)
+
+	return d.withTx(ctx, "UpdateArtist", func(qtx *repository.Queries) error {
+		if opts.MusicBrainzID != uuid.Nil {
+			l.Debug().Msgf("Updating artist with id %d with MusicBrainz ID %s", opts.ID, opts.MusicBrainzID)
+			err := qtx.UpdateArtistMbzID(ctx, repository.UpdateArtistMbzIDParams{
+				ID:            opts.ID,
+				MusicBrainzID: &opts.MusicBrainzID,
+			})
+			if err != nil {
+				return fmt.Errorf("UpdateArtist: UpdateArtistMbzID: %w", err)
+			}
 		}
-	}
-	if opts.Image != uuid.Nil {
-		if opts.ImageSrc == "" {
-			return fmt.Errorf("UpdateAlbum: image source must be provided when updating an image")
+		if opts.Image != uuid.Nil {
+			if opts.ImageSrc == "" {
+				return fmt.Errorf("UpdateAlbum: image source must be provided when updating an image")
+			}
+			l.Debug().Msgf("Updating artist with id %d with image %s", opts.ID, opts.Image)
+			err := qtx.UpdateArtistImage(ctx, repository.UpdateArtistImageParams{
+				ID:          opts.ID,
+				Image:       &opts.Image,
+				ImageSource: pgtype.Text{String: opts.ImageSrc, Valid: opts.ImageSrc != ""},
+			})
+			if err != nil {
+				return fmt.Errorf("UpdateArtist: UpdateArtistImage: %w", err)
+			}
 		}
-		l.Debug().Msgf("Updating artist with id %d with image %s", opts.ID, opts.Image)
-		err = qtx.UpdateArtistImage(ctx, repository.UpdateArtistImageParams{
-			ID:          opts.ID,
-			Image:       &opts.Image,
-			ImageSource: pgtype.Text{String: opts.ImageSrc, Valid: opts.ImageSrc != ""},
-		})
-		if err != nil {
-			return fmt.Errorf("UpdateArtist: UpdateArtistImage: %w", err)
-		}
-	}
-	err = tx.Commit(ctx)
-	if err != nil {
-		l.Err(err).Msg("Failed to commit update artist transaction")
-		return fmt.Errorf("UpdateArtist: Commit: %w", err)
-	}
-	return nil
+		return nil
+	})
 }
 
 func (d *Psql) DeleteArtistAlias(ctx context.Context, id int32, alias string) error {
@@ -256,60 +238,51 @@ func (d *Psql) GetAllArtistAliases(ctx context.Context, id int32) ([]models.Alia
 }
 
 func (d *Psql) SetPrimaryArtistAlias(ctx context.Context, id int32, alias string) error {
-	l := logger.FromContext(ctx)
 	if id == 0 {
 		return errors.New("SetPrimaryArtistAlias: artist id not specified")
 	}
-	tx, err := d.conn.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		l.Err(err).Msg("Failed to begin transaction")
-		return fmt.Errorf("SetPrimaryArtistAlias: BeginTx: %w", err)
-	}
-	defer tx.Rollback(ctx)
-	qtx := d.q.WithTx(tx)
-	aliases, err := qtx.GetAllArtistAliases(ctx, id)
-	if err != nil {
-		return fmt.Errorf("SetPrimaryArtistAlias: GetAllArtistAliases: %w", err)
-	}
-	primary := ""
-	exists := false
-	for _, v := range aliases {
-		if v.Alias == alias {
-			exists = true
+
+	return d.withTx(ctx, "SetPrimaryArtistAlias", func(qtx *repository.Queries) error {
+		aliases, err := qtx.GetAllArtistAliases(ctx, id)
+		if err != nil {
+			return fmt.Errorf("SetPrimaryArtistAlias: GetAllArtistAliases: %w", err)
 		}
-		if v.IsPrimary {
-			primary = v.Alias
+		primary := ""
+		exists := false
+		for _, v := range aliases {
+			if v.Alias == alias {
+				exists = true
+			}
+			if v.IsPrimary {
+				primary = v.Alias
+			}
 		}
-	}
-	if primary == alias {
+		if primary == alias {
+			return nil
+		}
+		if !exists {
+			return errors.New("SetPrimaryArtistAlias: alias does not exist")
+		}
+		err = qtx.SetArtistAliasPrimaryStatus(ctx, repository.SetArtistAliasPrimaryStatusParams{
+			ArtistID:  id,
+			Alias:     alias,
+			IsPrimary: true,
+		})
+		if err != nil {
+			return fmt.Errorf("SetPrimaryArtistAlias: SetArtistAliasPrimaryStatus (primary): %w", err)
+		}
+		err = qtx.SetArtistAliasPrimaryStatus(ctx, repository.SetArtistAliasPrimaryStatusParams{
+			ArtistID:  id,
+			Alias:     primary,
+			IsPrimary: false,
+		})
+		if err != nil {
+			return fmt.Errorf("SetPrimaryArtistAlias: SetArtistAliasPrimaryStatus (previous primary): %w", err)
+		}
 		return nil
-	}
-	if !exists {
-		return errors.New("SetPrimaryArtistAlias: alias does not exist")
-	}
-	err = qtx.SetArtistAliasPrimaryStatus(ctx, repository.SetArtistAliasPrimaryStatusParams{
-		ArtistID:  id,
-		Alias:     alias,
-		IsPrimary: true,
 	})
-	if err != nil {
-		return fmt.Errorf("SetPrimaryArtistAlias: SetArtistAliasPrimaryStatus (primary): %w", err)
-	}
-	err = qtx.SetArtistAliasPrimaryStatus(ctx, repository.SetArtistAliasPrimaryStatusParams{
-		ArtistID:  id,
-		Alias:     primary,
-		IsPrimary: false,
-	})
-	if err != nil {
-		return fmt.Errorf("SetPrimaryArtistAlias: SetArtistAliasPrimaryStatus (previous primary): %w", err)
-	}
-	err = tx.Commit(ctx)
-	if err != nil {
-		l.Err(err).Msg("Failed to commit transaction")
-		return fmt.Errorf("SetPrimaryArtistAlias: Commit: %w", err)
-	}
-	return nil
 }
+
 func (d *Psql) GetArtistsForAlbum(ctx context.Context, id int32) ([]*models.Artist, error) {
 	l := logger.FromContext(ctx)
 	l.Debug().Msgf("Fetching artists for album ID %d", id)
