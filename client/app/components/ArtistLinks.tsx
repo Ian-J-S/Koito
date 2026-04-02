@@ -11,12 +11,13 @@ type ArtistLinksProps = {
 };
 
 const ArtistLinks: React.FC<ArtistLinksProps> = ({ artists }) => {
+  if (!artists) return null;
   return (
     <>
-      {artists.map((artist, index) => (
+      {artists.filter(artist => artist).map((artist, index) => (
         <span key={artist.id} className='color-fg-secondary'>
           <Link className="hover:text-(--color-fg-tertiary)" to={`/artist/${artist.id}`}>{artist.name}</Link>
-          {index < artists.length - 1 ? ', ' : ''}
+          {index < artists.filter(a => a).length - 1 ? ', ' : ''}
         </span>
       ))}
     </>
