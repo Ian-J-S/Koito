@@ -21,7 +21,7 @@ import (
 func (d *Psql) GetAlbum(ctx context.Context, opts db.GetAlbumOpts) (*models.Album, error) {
 	l := logger.FromContext(ctx)
 	var err error
-	var ret = new(models.Album)
+	ret := new(models.Album)
 
 	if opts.MusicBrainzID != uuid.Nil {
 		l.Debug().Msgf("Fetching album from DB with MusicBrainz Release ID %s", opts.MusicBrainzID)
@@ -170,85 +170,77 @@ func (d *Psql) SaveAlbum(ctx context.Context, opts db.SaveAlbumOpts) (*models.Al
 			return nil, errors.New("SaveAlbum: none of 'ArtistIDs' may be 0")
 		}
 	}
-	tx, err := d.conn.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		l.Err(err).Msg("Failed to begin transaction")
-		return nil, fmt.Errorf("SaveAlbum: BeginTx: %w", err)
-	}
-	defer tx.Rollback(ctx)
-	qtx := d.q.WithTx(tx)
-	l.Debug().Msgf("Inserting release '%s' into DB", opts.Title)
-	r, err := qtx.InsertRelease(ctx, repository.InsertReleaseParams{
-		MusicBrainzID:  insertMbzID,
-		VariousArtists: opts.VariousArtists,
-		Image:          insertImage,
-		ImageSource:    pgtype.Text{String: opts.ImageSrc, Valid: opts.ImageSrc != ""},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("SaveAlbum: InsertRelease: %w", err)
-	}
-	for _, artistId := range opts.ArtistIDs {
-		l.Debug().Msgf("Associating release '%s' to artist with ID %d", opts.Title, artistId)
-		err = qtx.AssociateArtistToRelease(ctx, repository.AssociateArtistToReleaseParams{
-			ArtistID:  artistId,
-			ReleaseID: r.ID,
-			IsPrimary: opts.ArtistIDs[0] == artistId,
+
+	album, err := withTxResult(ctx, d, "SaveAlbum", func(qtx *repository.Queries) (*models.Album, error) {
+		l.Debug().Msgf("Inserting release '%s' into DB", opts.Title)
+		r, err := qtx.InsertRelease(ctx, repository.InsertReleaseParams{
+			MusicBrainzID:  insertMbzID,
+			VariousArtists: opts.VariousArtists,
+			Image:          insertImage,
+			ImageSource:    pgtype.Text{String: opts.ImageSrc, Valid: opts.ImageSrc != ""},
 		})
 		if err != nil {
-			return nil, fmt.Errorf("SaveAlbum: AssociateArtistToRelease: %w", err)
+			return nil, fmt.Errorf("SaveAlbum: InsertRelease: %w", err)
 		}
-	}
-	l.Debug().Msgf("Saving canonical alias %s for release %d", opts.Title, r.ID)
-	err = qtx.InsertReleaseAlias(ctx, repository.InsertReleaseAliasParams{
-		ReleaseID: r.ID,
-		Alias:     opts.Title,
-		Source:    "Canonical",
-		IsPrimary: true,
+		for _, artistId := range opts.ArtistIDs {
+			l.Debug().Msgf("Associating release '%s' to artist with ID %d", opts.Title, artistId)
+			err = qtx.AssociateArtistToRelease(ctx, repository.AssociateArtistToReleaseParams{
+				ArtistID:  artistId,
+				ReleaseID: r.ID,
+				IsPrimary: opts.ArtistIDs[0] == artistId,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("SaveAlbum: AssociateArtistToRelease: %w", err)
+			}
+		}
+		l.Debug().Msgf("Saving canonical alias %s for release %d", opts.Title, r.ID)
+		err = qtx.InsertReleaseAlias(ctx, repository.InsertReleaseAliasParams{
+			ReleaseID: r.ID,
+			Alias:     opts.Title,
+			Source:    "Canonical",
+			IsPrimary: true,
+		})
+		if err != nil {
+			l.Err(err).Msgf("Failed to save canonical alias for album %d", r.ID)
+			return nil, fmt.Errorf("SaveAlbum: InsertReleaseAlias: %w", err)
+		}
+
+		return &models.Album{
+			ID:             r.ID,
+			MbzID:          r.MusicBrainzID,
+			Title:          opts.Title,
+			Image:          r.Image,
+			VariousArtists: r.VariousArtists,
+		}, nil
 	})
 	if err != nil {
-		l.Err(err).Msgf("Failed to save canonical alias for album %d", r.ID)
-		return nil, fmt.Errorf("SaveAlbum: InsertReleaseAlias: %w", err)
+		return nil, err
 	}
 
-	err = tx.Commit(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("SaveAlbum: Commit: %w", err)
-	}
-
-	err = d.SaveAlbumAliases(ctx, r.ID, opts.Aliases, "MusicBrainz")
+	err = d.SaveAlbumAliases(ctx, album.ID, opts.Aliases, "MusicBrainz")
 	if err != nil {
 		l.Err(err).Msgf("Failed to save aliases for album %s", opts.Title)
 	}
 
-	return &models.Album{
-		ID:             r.ID,
-		MbzID:          r.MusicBrainzID,
-		Title:          opts.Title,
-		Image:          r.Image,
-		VariousArtists: r.VariousArtists,
-	}, nil
+	return album, nil
 }
 
 func (d *Psql) AddArtistsToAlbum(ctx context.Context, opts db.AddArtistsToAlbumOpts) error {
 	l := logger.FromContext(ctx)
-	tx, err := d.conn.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		l.Err(err).Msg("Failed to begin transaction")
-		return fmt.Errorf("AddArtistsToAlbum: BeginTx: %w", err)
-	}
-	defer tx.Rollback(ctx)
-	qtx := d.q.WithTx(tx)
-	for _, id := range opts.ArtistIDs {
-		err := qtx.AssociateArtistToRelease(ctx, repository.AssociateArtistToReleaseParams{
-			ReleaseID: opts.AlbumID,
-			ArtistID:  id,
-		})
-		if err != nil {
-			l.Error().Err(err).Msgf("Failed to associate release %d with artist %d", opts.AlbumID, id)
-			return fmt.Errorf("AddArtistsToAlbum: AssociateArtistToRelease: %w", err)
+
+	return d.withTx(ctx, "AddArtistsToAlbum", func(qtx *repository.Queries) error {
+		for _, id := range opts.ArtistIDs {
+			err := qtx.AssociateArtistToRelease(ctx, repository.AssociateArtistToReleaseParams{
+				ReleaseID: opts.AlbumID,
+				ArtistID:  id,
+			})
+			if err != nil {
+				l.Error().Err(err).Msgf("Failed to associate release %d with artist %d", opts.AlbumID, id)
+				return fmt.Errorf("AddArtistsToAlbum: AssociateArtistToRelease: %w", err)
+			}
 		}
-	}
-	return tx.Commit(ctx)
+		return nil
+	})
 }
 
 func (d *Psql) UpdateAlbum(ctx context.Context, opts db.UpdateAlbumOpts) error {
@@ -256,90 +248,82 @@ func (d *Psql) UpdateAlbum(ctx context.Context, opts db.UpdateAlbumOpts) error {
 	if opts.ID == 0 {
 		return errors.New("missing album id")
 	}
-	tx, err := d.conn.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		l.Err(err).Msg("Failed to begin transaction")
-		return fmt.Errorf("UpdateAlbum: BeginTx: %w", err)
-	}
-	defer tx.Rollback(ctx)
-	qtx := d.q.WithTx(tx)
-	if opts.MusicBrainzID != uuid.Nil {
-		l.Debug().Msgf("Updating release with ID %d with MusicBrainz ID %s", opts.ID, opts.MusicBrainzID)
-		err := qtx.UpdateReleaseMbzID(ctx, repository.UpdateReleaseMbzIDParams{
-			ID:            opts.ID,
-			MusicBrainzID: &opts.MusicBrainzID,
-		})
-		if err != nil {
-			return fmt.Errorf("UpdateAlbum: UpdateReleaseMbzID: %w", err)
+
+	return d.withTx(ctx, "UpdateAlbum", func(qtx *repository.Queries) error {
+		if opts.MusicBrainzID != uuid.Nil {
+			l.Debug().Msgf("Updating release with ID %d with MusicBrainz ID %s", opts.ID, opts.MusicBrainzID)
+			err := qtx.UpdateReleaseMbzID(ctx, repository.UpdateReleaseMbzIDParams{
+				ID:            opts.ID,
+				MusicBrainzID: &opts.MusicBrainzID,
+			})
+			if err != nil {
+				return fmt.Errorf("UpdateAlbum: UpdateReleaseMbzID: %w", err)
+			}
 		}
-	}
-	if opts.Image != uuid.Nil {
-		if opts.ImageSrc == "" {
-			return fmt.Errorf("UpdateAlbum: image source must be provided when updating an image")
+		if opts.Image != uuid.Nil {
+			if opts.ImageSrc == "" {
+				return fmt.Errorf("UpdateAlbum: image source must be provided when updating an image")
+			}
+			l.Debug().Msgf("Updating release with ID %d with image %s", opts.ID, opts.Image)
+			err := qtx.UpdateReleaseImage(ctx, repository.UpdateReleaseImageParams{
+				ID:          opts.ID,
+				Image:       &opts.Image,
+				ImageSource: pgtype.Text{String: opts.ImageSrc, Valid: opts.ImageSrc != ""},
+			})
+			if err != nil {
+				return fmt.Errorf("UpdateAlbum: UpdateReleaseImage: %w", err)
+			}
 		}
-		l.Debug().Msgf("Updating release with ID %d with image %s", opts.ID, opts.Image)
-		err := qtx.UpdateReleaseImage(ctx, repository.UpdateReleaseImageParams{
-			ID:          opts.ID,
-			Image:       &opts.Image,
-			ImageSource: pgtype.Text{String: opts.ImageSrc, Valid: opts.ImageSrc != ""},
-		})
-		if err != nil {
-			return fmt.Errorf("UpdateAlbum: UpdateReleaseImage: %w", err)
+		if opts.VariousArtistsUpdate {
+			l.Debug().Msgf("Updating release with ID %d with image %s", opts.ID, opts.Image)
+			err := qtx.UpdateReleaseVariousArtists(ctx, repository.UpdateReleaseVariousArtistsParams{
+				ID:             opts.ID,
+				VariousArtists: opts.VariousArtistsValue,
+			})
+			if err != nil {
+				return fmt.Errorf("UpdateAlbum: UpdateReleaseVariousArtists: %w", err)
+			}
 		}
-	}
-	if opts.VariousArtistsUpdate {
-		l.Debug().Msgf("Updating release with ID %d with image %s", opts.ID, opts.Image)
-		err := qtx.UpdateReleaseVariousArtists(ctx, repository.UpdateReleaseVariousArtistsParams{
-			ID:             opts.ID,
-			VariousArtists: opts.VariousArtistsValue,
-		})
-		if err != nil {
-			return fmt.Errorf("UpdateAlbum: UpdateReleaseVariousArtists: %w", err)
-		}
-	}
-	return tx.Commit(ctx)
+		return nil
+	})
 }
 
 func (d *Psql) SaveAlbumAliases(ctx context.Context, id int32, aliases []string, source string) error {
-	l := logger.FromContext(ctx)
 	if id == 0 {
 		return errors.New("album id not specified")
 	}
-	tx, err := d.conn.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		l.Err(err).Msg("Failed to begin transaction")
-		return fmt.Errorf("SaveAlbumAliases: BeginTx: %w", err)
-	}
-	defer tx.Rollback(ctx)
-	qtx := d.q.WithTx(tx)
-	existing, err := qtx.GetAllReleaseAliases(ctx, id)
-	if err != nil {
-		return fmt.Errorf("SaveAlbumAliases: GetAllReleaseAliases: %w", err)
-	}
-	for _, v := range existing {
-		aliases = append(aliases, v.Alias)
-	}
-	utils.Unique(&aliases)
-	for _, alias := range aliases {
-		if strings.TrimSpace(alias) == "" {
-			return errors.New("SaveAlbumAliases: aliases cannot be blank")
-		}
-		err = qtx.InsertReleaseAlias(ctx, repository.InsertReleaseAliasParams{
-			Alias:     strings.TrimSpace(alias),
-			ReleaseID: id,
-			Source:    source,
-			IsPrimary: false,
-		})
+
+	return d.withTx(ctx, "SaveAlbumAliases", func(qtx *repository.Queries) error {
+		existing, err := qtx.GetAllReleaseAliases(ctx, id)
 		if err != nil {
-			return fmt.Errorf("SaveAlbumAliases: InsertReleaseAlias: %w", err)
+			return fmt.Errorf("SaveAlbumAliases: GetAllReleaseAliases: %w", err)
 		}
-	}
-	return tx.Commit(ctx)
+		for _, v := range existing {
+			aliases = append(aliases, v.Alias)
+		}
+		utils.Unique(&aliases)
+		for _, alias := range aliases {
+			if strings.TrimSpace(alias) == "" {
+				return errors.New("SaveAlbumAliases: aliases cannot be blank")
+			}
+			err = qtx.InsertReleaseAlias(ctx, repository.InsertReleaseAliasParams{
+				Alias:     strings.TrimSpace(alias),
+				ReleaseID: id,
+				Source:    source,
+				IsPrimary: false,
+			})
+			if err != nil {
+				return fmt.Errorf("SaveAlbumAliases: InsertReleaseAlias: %w", err)
+			}
+		}
+		return nil
+	})
 }
 
 func (d *Psql) DeleteAlbum(ctx context.Context, id int32) error {
 	return d.q.DeleteRelease(ctx, id)
 }
+
 func (d *Psql) DeleteAlbumAlias(ctx context.Context, id int32, alias string) error {
 	return d.q.DeleteReleaseAlias(ctx, repository.DeleteReleaseAliasParams{
 		ReleaseID: id,
@@ -365,56 +349,49 @@ func (d *Psql) GetAllAlbumAliases(ctx context.Context, id int32) ([]models.Alias
 }
 
 func (d *Psql) SetPrimaryAlbumAlias(ctx context.Context, id int32, alias string) error {
-	l := logger.FromContext(ctx)
 	if id == 0 {
 		return errors.New("artist id not specified")
 	}
-	tx, err := d.conn.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		l.Err(err).Msg("Failed to begin transaction")
-		return fmt.Errorf("SetPrimaryAlbumAlias: BeginTx: %w", err)
-	}
-	defer tx.Rollback(ctx)
-	qtx := d.q.WithTx(tx)
-	// get all aliases
-	aliases, err := qtx.GetAllReleaseAliases(ctx, id)
-	if err != nil {
-		return fmt.Errorf("SetPrimaryAlbumAlias: GetAllReleaseAliases: %w", err)
-	}
-	primary := ""
-	exists := false
-	for _, v := range aliases {
-		if v.Alias == alias {
-			exists = true
+
+	return d.withTx(ctx, "SetPrimaryAlbumAlias", func(qtx *repository.Queries) error {
+		aliases, err := qtx.GetAllReleaseAliases(ctx, id)
+		if err != nil {
+			return fmt.Errorf("SetPrimaryAlbumAlias: GetAllReleaseAliases: %w", err)
 		}
-		if v.IsPrimary {
-			primary = v.Alias
+		primary := ""
+		exists := false
+		for _, v := range aliases {
+			if v.Alias == alias {
+				exists = true
+			}
+			if v.IsPrimary {
+				primary = v.Alias
+			}
 		}
-	}
-	if primary == alias {
-		// no-op rename
+		if primary == alias {
+			return nil
+		}
+		if !exists {
+			return errors.New("SetPrimaryAlbumAlias: alias does not exist")
+		}
+		err = qtx.SetReleaseAliasPrimaryStatus(ctx, repository.SetReleaseAliasPrimaryStatusParams{
+			ReleaseID: id,
+			Alias:     alias,
+			IsPrimary: true,
+		})
+		if err != nil {
+			return fmt.Errorf("SetPrimaryAlbumAlias: SetReleaseAliasPrimaryStatus: %w", err)
+		}
+		err = qtx.SetReleaseAliasPrimaryStatus(ctx, repository.SetReleaseAliasPrimaryStatusParams{
+			ReleaseID: id,
+			Alias:     primary,
+			IsPrimary: false,
+		})
+		if err != nil {
+			return fmt.Errorf("SetPrimaryAlbumAlias: SetReleaseAliasPrimaryStatus: %w", err)
+		}
 		return nil
-	}
-	if !exists {
-		return errors.New("SetPrimaryAlbumAlias: alias does not exist")
-	}
-	err = qtx.SetReleaseAliasPrimaryStatus(ctx, repository.SetReleaseAliasPrimaryStatusParams{
-		ReleaseID: id,
-		Alias:     alias,
-		IsPrimary: true,
 	})
-	if err != nil {
-		return fmt.Errorf("SetPrimaryAlbumAlias: SetReleaseAliasPrimaryStatus: %w", err)
-	}
-	err = qtx.SetReleaseAliasPrimaryStatus(ctx, repository.SetReleaseAliasPrimaryStatusParams{
-		ReleaseID: id,
-		Alias:     primary,
-		IsPrimary: false,
-	})
-	if err != nil {
-		return fmt.Errorf("SetPrimaryAlbumAlias: SetReleaseAliasPrimaryStatus: %w", err)
-	}
-	return tx.Commit(ctx)
 }
 
 func (d *Psql) SetPrimaryAlbumArtist(ctx context.Context, id int32, artistId int32, value bool) error {
@@ -422,51 +399,41 @@ func (d *Psql) SetPrimaryAlbumArtist(ctx context.Context, id int32, artistId int
 	if id == 0 {
 		return errors.New("artist id not specified")
 	}
-	tx, err := d.conn.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		l.Err(err).Msg("Failed to begin transaction")
-		return fmt.Errorf("SetPrimaryAlbumArtist: BeginTx: %w", err)
-	}
-	defer tx.Rollback(ctx)
-	qtx := d.q.WithTx(tx)
-	// get all artists
-	artists, err := qtx.GetReleaseArtists(ctx, id)
-	if err != nil {
-		return fmt.Errorf("SetPrimaryAlbumArtist: GetReleaseArtists: %w", err)
-	}
-	var primary int32
-	for _, v := range artists {
-		// i dont get it??? is_primary is not a nullable column??? why use pgtype.Bool???
-		// why not just use boolean??? is sqlc stupid??? am i stupid???????
-		if v.IsPrimary.Valid && v.IsPrimary.Bool {
-			primary = v.ID
+
+	return d.withTx(ctx, "SetPrimaryAlbumArtist", func(qtx *repository.Queries) error {
+		artists, err := qtx.GetReleaseArtists(ctx, id)
+		if err != nil {
+			return fmt.Errorf("SetPrimaryAlbumArtist: GetReleaseArtists: %w", err)
 		}
-	}
-	if value && primary == artistId {
-		// no-op
-		return nil
-	}
-	l.Debug().Msgf("Marking artist with id %d as 'primary = %v' on album with id %d", artistId, value, id)
-	err = qtx.UpdateReleasePrimaryArtist(ctx, repository.UpdateReleasePrimaryArtistParams{
-		ReleaseID: id,
-		ArtistID:  artistId,
-		IsPrimary: value,
-	})
-	if err != nil {
-		return fmt.Errorf("SetPrimaryAlbumArtist: UpdateReleasePrimaryArtist: %w", err)
-	}
-	if value && primary != 0 {
-		// if we were marking a new one as primary and there was already one marked as primary,
-		// unmark that one as there can only be one
-		l.Debug().Msgf("Unmarking artist with id %d as primary on album with id %d", primary, id)
+		var primary int32
+		for _, v := range artists {
+			if v.IsPrimary.Valid && v.IsPrimary.Bool {
+				primary = v.ID
+			}
+		}
+		if value && primary == artistId {
+			return nil
+		}
+		l.Debug().Msgf("Marking artist with id %d as 'primary = %v' on album with id %d", artistId, value, id)
 		err = qtx.UpdateReleasePrimaryArtist(ctx, repository.UpdateReleasePrimaryArtistParams{
 			ReleaseID: id,
-			ArtistID:  primary,
-			IsPrimary: false,
+			ArtistID:  artistId,
+			IsPrimary: value,
 		})
 		if err != nil {
 			return fmt.Errorf("SetPrimaryAlbumArtist: UpdateReleasePrimaryArtist: %w", err)
 		}
-	}
-	return tx.Commit(ctx)
+		if value && primary != 0 {
+			l.Debug().Msgf("Unmarking artist with id %d as primary on album with id %d", primary, id)
+			err = qtx.UpdateReleasePrimaryArtist(ctx, repository.UpdateReleasePrimaryArtistParams{
+				ReleaseID: id,
+				ArtistID:  primary,
+				IsPrimary: false,
+			})
+			if err != nil {
+				return fmt.Errorf("SetPrimaryAlbumArtist: UpdateReleasePrimaryArtist: %w", err)
+			}
+		}
+		return nil
+	})
 }

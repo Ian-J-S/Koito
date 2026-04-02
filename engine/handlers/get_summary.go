@@ -16,7 +16,11 @@ func SummaryHandler(store db.DB) http.HandlerFunc {
 		l.Debug().Msg("SummaryHandler: Received request to retrieve summary")
 		timeframe := TimeframeFromRequest(r)
 
-		summary, err := summary.GenerateSummary(ctx, store, 1, timeframe, "")
+		summary, err := summary.GenerateSummary(ctx, store, summary.GenerateSummaryOpts{
+			UserID:    1,
+			Timeframe: timeframe,
+			Title:     "",
+		})
 		if err != nil {
 			l.Err(err).Int("userid", 1).Any("timeframe", timeframe).Msgf("SummaryHandler: Failed to generate summary")
 			utils.WriteError(w, "failed to generate summary", http.StatusInternalServerError)

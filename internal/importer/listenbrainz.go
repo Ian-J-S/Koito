@@ -21,6 +21,13 @@ import (
 	"github.com/google/uuid"
 )
 
+type ImportListenBrainzFileOpts struct {
+	Store    db.DB
+	Mbz      mbz.MusicBrainzCaller
+	Reader   io.Reader
+	Filename string
+}
+
 func ImportListenBrainzExport(ctx context.Context, store db.DB, mbzc mbz.MusicBrainzCaller, filename string) error {
 	l := logger.FromContext(ctx)
 
@@ -46,7 +53,12 @@ func ImportListenBrainzExport(ctx context.Context, store db.DB, mbzc mbz.MusicBr
 				continue
 			}
 
-			err = ImportListenBrainzFile(ctx, store, mbzc, rc, f.Name)
+			err = ImportListenBrainzFile(ctx, ImportListenBrainzFileOpts{
+				Store:    store,
+				Mbz:      mbzc,
+				Reader:   rc,
+				Filename: f.Name,
+			})
 			if err != nil {
 				l.Err(err).Msgf("Failed to import listens from file: %s", f.Name)
 			}
@@ -57,13 +69,18 @@ func ImportListenBrainzExport(ctx context.Context, store db.DB, mbzc mbz.MusicBr
 	return finishImport(ctx, filename, 0)
 }
 
-func ImportListenBrainzFile(ctx context.Context, store db.DB, mbzc mbz.MusicBrainzCaller, r io.Reader, filename string) error {
+func ImportListenBrainzFile(ctx context.Context, opts ImportListenBrainzFileOpts) error {
+	store := opts.Store
+	mbzc := opts.Mbz
+	r := opts.Reader
+	filename := opts.Filename
+
 	l := logger.FromContext(ctx)
 	l.Info().Msgf("Beginning ListenBrainz import on file: %s", filename)
 
 	scanner := bufio.NewScanner(r)
 
-	var throttleFunc = func() {}
+	throttleFunc := func() {}
 	if ms := cfg.ThrottleImportMs(); ms > 0 {
 		throttleFunc = func() {
 			time.Sleep(time.Duration(ms) * time.Millisecond)

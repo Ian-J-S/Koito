@@ -10,9 +10,9 @@ import (
 
 type Summary struct {
 	Title            string                          `json:"title,omitempty"`
-	TopArtists       []db.RankedItem[*models.Artist] `json:"top_artists"` // ListenCount and TimeListened are overriden with stats from timeframe
-	TopAlbums        []db.RankedItem[*models.Album]  `json:"top_albums"`  // ListenCount and TimeListened are overriden with stats from timeframe
-	TopTracks        []db.RankedItem[*models.Track]  `json:"top_tracks"`  // ListenCount and TimeListened are overriden with stats from timeframe
+	TopArtists       []db.RankedItem[*models.Artist] `json:"top_artists"` // ListenCount and TimeListened are overridden with stats from timeframe
+	TopAlbums        []db.RankedItem[*models.Album]  `json:"top_albums"`  // ListenCount and TimeListened are overridden with stats from timeframe
+	TopTracks        []db.RankedItem[*models.Track]  `json:"top_tracks"`  // ListenCount and TimeListened are overridden with stats from timeframe
 	MinutesListened  int                             `json:"minutes_listened"`
 	AvgMinutesPerDay int                             `json:"avg_minutes_listened_per_day"`
 	Plays            int                             `json:"plays"`
@@ -25,10 +25,21 @@ type Summary struct {
 	NewArtists       int                             `json:"new_artists"`
 }
 
-func GenerateSummary(ctx context.Context, store db.DB, userId int32, timeframe db.Timeframe, title string) (summary *Summary, err error) {
-	// l := logger.FromContext(ctx)
+type GenerateSummaryOpts struct {
+	UserID    int32
+	Timeframe db.Timeframe
+	Title     string
+}
+
+func GenerateSummary(ctx context.Context, store db.DB, opts GenerateSummaryOpts) (summary *Summary, err error) {
+	userId := opts.UserID
+	timeframe := opts.Timeframe
+	title := opts.Title
+
+	_ = userId
 
 	summary = new(Summary)
+	summary.Title = title
 
 	topArtists, err := store.GetTopArtistsPaginated(ctx, db.GetItemsOpts{Page: 1, Limit: 5, Timeframe: timeframe})
 	if err != nil {

@@ -36,24 +36,31 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   useEffect(() => {
-    fetch("/apis/web/v1/user/me")
-      .then((res) => res.json())
-      .then((data) => {
-        data.error ? setUser(null) : setUser(data);
-      })
-      .catch(() => setUser(null));
-
-    setConfigurableHomeActivity(true);
-    setHomeItems(12);
-
-    getCfg().then((cfg) => {
-      console.log(cfg);
-      if (cfg.default_theme !== "") {
-        setDefaultTheme(cfg.default_theme);
-      } else {
-        setDefaultTheme('yuu');
+    const loadAppData = async () => {
+      try {
+        const userRes = await fetch("/apis/web/v1/user/me");
+        const userData = await userRes.json();
+        userData.error ? setUser(null) : setUser(userData);
+      } catch {
+        setUser(null);
       }
-    });
+
+      setConfigurableHomeActivity(true);
+      setHomeItems(12);
+
+      try {
+        const cfg = await getCfg();
+        if (cfg.default_theme !== "") {
+          setDefaultTheme(cfg.default_theme);
+        } else {
+          setDefaultTheme("Testing");
+        }
+      } catch {
+        setDefaultTheme("Testing");
+      }
+    };
+
+    loadAppData();
   }, []);
 
   const isLoading = user === undefined || defaultTheme === undefined;
