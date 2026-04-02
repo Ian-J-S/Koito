@@ -17,6 +17,7 @@ import Sidebar from "./components/sidebar/Sidebar";
 import Footer from "./components/Footer";
 import { AppProvider } from "./providers/AppProvider";
 import { initTimezoneCookie } from "./tz";
+import AppErrorBoundary from "./components/AppErrorBoundary";
 
 initTimezoneCookie();
 
@@ -71,7 +72,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   return (
-    <>
+    <AppErrorBoundary>
       <AppProvider>
         <ThemeProvider>
           <QueryClientProvider client={queryClient}>
@@ -85,10 +86,9 @@ export default function App() {
           </QueryClientProvider>
         </ThemeProvider>
       </AppProvider>
-    </>
+    </AppErrorBoundary>
   );
 }
-
 export function HydrateFallback() {
   return null;
 }
