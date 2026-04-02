@@ -35,109 +35,173 @@ func Run(
 	w io.Writer,
 	version string,
 ) error {
-	err := cfg.Load(getenv, version)
-	if err != nil {
+	if err := cfg.Load(getenv, version); err != nil {
 		return fmt.Errorf("Engine: failed to load configuration: %w", err)
 	}
 
 	l := logger.Get()
-
 	l.Debug().Msg("Engine: Starting application initialization")
+	configureLogging(l, w)
 
+	ctx := logger.NewContext(l)
+	l.Info().Msgf("Koito %s", version)
+
+	if err := ensureEngineDirectories(l); err != nil {
+		return err
+	}
+
+	store, err := connectDatabaseWithRetry(l)
+	if err != nil {
+		return err
+	}
+	defer store.Close(ctx)
+
+	logForcedTimezone(l)
+
+	mbzC := newMusicBrainzCaller(l)
+	if err := validateSubsonicConfiguration(l); err != nil {
+		return err
+	}
+
+	initializeImageSources(l)
+	if err := ensureDefaultUser(ctx, l, store); err != nil {
+		return err
+	}
+
+	logHostConfiguration(l)
+	logCORSConfiguration(l)
+	warnOnInvalidListenBrainzRelayConfig(l)
+
+	httpServer, serverErr, err := startHTTPServer(l, store, mbzC)
+	if err != nil {
+		return err
+	}
+
+	startBackgroundTasks(ctx, l, store, mbzC)
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+
+	runErr := waitForShutdown(l, quit, serverErr)
+	return shutdown(ctx, l, httpServer, mbzC, runErr)
+}
+
+func configureLogging(l *zerolog.Logger, w io.Writer) {
 	if cfg.StructuredLogging() {
 		l.Debug().Msg("Engine: Enabling structured logging")
 		*l = l.Output(w)
-	} else {
-		l.Debug().Msg("Engine: Enabling console logging")
-		*l = l.Output(zerolog.ConsoleWriter{
-			Out:        w,
-			TimeFormat: time.RFC3339,
-			FormatMessage: func(i interface{}) string {
-				return fmt.Sprintf("\u001b[30;1m>\u001b[0m %s |", i)
-			},
-		})
+		return
 	}
 
-	ctx := logger.NewContext(l)
+	l.Debug().Msg("Engine: Enabling console logging")
+	*l = l.Output(zerolog.ConsoleWriter{
+		Out:        w,
+		TimeFormat: time.RFC3339,
+		FormatMessage: func(i interface{}) string {
+			return fmt.Sprintf("\u001b[30;1m>\u001b[0m %s |", i)
+		},
+	})
+}
 
-	l.Info().Msgf("Koito %s", version)
-
-	l.Debug().Msgf("Engine: Checking config directory: %s", cfg.ConfigDir())
-	_, err = os.Stat(cfg.ConfigDir())
-	if err != nil {
-		l.Info().Msgf("Engine: Creating config directory: %s", cfg.ConfigDir())
-		err = os.MkdirAll(cfg.ConfigDir(), 0744)
-		if err != nil {
-			l.Error().Err(err).Msg("Engine: Failed to create config directory")
-			return err
-		}
+func ensureEngineDirectories(l *zerolog.Logger) error {
+	if err := ensureDirectory(l, cfg.ConfigDir(), true); err != nil {
+		return err
 	}
 	l.Info().Msgf("Engine: Using config directory: %s", cfg.ConfigDir())
 
-	l.Debug().Msgf("Engine: Checking import directory: %s", path.Join(cfg.ConfigDir(), "import"))
-	_, err = os.Stat(path.Join(cfg.ConfigDir(), "import"))
-	if err != nil {
-		l.Info().Msgf("Engine: Creating import directory: %s", path.Join(cfg.ConfigDir(), "import"))
-		err = os.Mkdir(path.Join(cfg.ConfigDir(), "import"), 0744)
-		if err != nil {
-			l.Error().Err(err).Msg("Engine: Failed to create import directory")
-			return err
-		}
+	return ensureDirectory(l, path.Join(cfg.ConfigDir(), "import"), false)
+}
+
+func ensureDirectory(l *zerolog.Logger, dir string, recursive bool) error {
+	kind := "directory"
+	if path.Base(dir) == "import" {
+		kind = "import directory"
 	}
 
+	l.Debug().Msgf("Engine: Checking %s: %s", kind, dir)
+	_, err := os.Stat(dir)
+	if err == nil {
+		return nil
+	}
+
+	l.Info().Msgf("Engine: Creating %s: %s", kind, dir)
+	if recursive {
+		err = os.MkdirAll(dir, 0o744)
+	} else {
+		err = os.Mkdir(dir, 0o744)
+	}
+	if err != nil {
+		l.Error().Err(err).Msgf("Engine: Failed to create %s", kind)
+		return err
+	}
+
+	return nil
+}
+
+func connectDatabaseWithRetry(l *zerolog.Logger) (*psql.Psql, error) {
 	l.Debug().Msg("Engine: Initializing database connection")
-	var store *psql.Psql
-	store, err = psql.New()
+	store, err := psql.New()
 	for err != nil {
 		l.Error().Err(err).Msg("Engine: Failed to connect to database; retrying in 5 seconds")
 		time.Sleep(5 * time.Second)
 		store, err = psql.New()
 	}
-	defer store.Close(ctx)
 	l.Info().Msg("Engine: Database connection established")
+	return store, nil
+}
 
+func logForcedTimezone(l *zerolog.Logger) {
 	if cfg.ForceTZ() != nil {
 		l.Debug().Msgf("Engine: Forcing the use of timezone '%s'", cfg.ForceTZ().String())
 	}
+}
 
+func newMusicBrainzCaller(l *zerolog.Logger) mbz.MusicBrainzCaller {
 	l.Debug().Msg("Engine: Initializing MusicBrainz client")
-	var mbzC mbz.MusicBrainzCaller
 	if !cfg.MusicBrainzDisabled() {
-		mbzC = mbz.NewMusicBrainzClient()
 		l.Info().Msg("Engine: MusicBrainz client initialized")
-	} else {
-		mbzC = &mbz.MbzErrorCaller{}
-		l.Warn().Msg("Engine: MusicBrainz client disabled")
+		return mbz.NewMusicBrainzClient()
 	}
 
-	if cfg.SubsonicEnabled() {
-		l.Debug().Msg("Engine: Checking Subsonic configuration")
-		pingURL := cfg.SubsonicUrl() + "/rest/ping.view?" + cfg.SubsonicParams() + "&f=json&v=1&c=koito"
+	l.Warn().Msg("Engine: MusicBrainz client disabled")
+	return &mbz.MbzErrorCaller{}
+}
 
-		resp, err := http.Get(pingURL)
-		if err != nil {
-			l.Error().Err(err).Msg("Engine: Failed to contact Subsonic server! Ensure the provided URL is correct")
-			return err
-		}
-		defer resp.Body.Close()
-
-		var result struct {
-			Response struct {
-				Status string `json:"status"`
-			} `json:"subsonic-response"`
-		}
-
-		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-			l.Error().Err(err).Msg("Engine: Failed to parse Subsonic response")
-			return err
-		} else if result.Response.Status != "ok" {
-			l.Error().Msg("Engine: Provided Subsonic credentials are invalid")
-			return fmt.Errorf("Engine: invalid Subsonic credentials")
-		} else {
-			l.Info().Msg("Engine: Subsonic credentials validated successfully")
-		}
+func validateSubsonicConfiguration(l *zerolog.Logger) error {
+	if !cfg.SubsonicEnabled() {
+		return nil
 	}
 
+	l.Debug().Msg("Engine: Checking Subsonic configuration")
+	pingURL := cfg.SubsonicUrl() + "/rest/ping.view?" + cfg.SubsonicParams() + "&f=json&v=1&c=koito"
+
+	resp, err := http.Get(pingURL)
+	if err != nil {
+		l.Error().Err(err).Msg("Engine: Failed to contact Subsonic server! Ensure the provided URL is correct")
+		return err
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Response struct {
+			Status string `json:"status"`
+		} `json:"subsonic-response"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		l.Error().Err(err).Msg("Engine: Failed to parse Subsonic response")
+		return err
+	}
+	if result.Response.Status != "ok" {
+		l.Error().Msg("Engine: Provided Subsonic credentials are invalid")
+		return fmt.Errorf("Engine: invalid Subsonic credentials")
+	}
+
+	l.Info().Msg("Engine: Subsonic credentials validated successfully")
+	return nil
+}
+
+func initializeImageSources(l *zerolog.Logger) {
 	l.Debug().Msg("Engine: Initializing image sources")
 	images.Initialize(images.ImageSourceOpts{
 		UserAgent:      cfg.UserAgent(),
@@ -147,57 +211,75 @@ func Run(
 		EnableLastFM:   cfg.LastFMApiKey() != "",
 	})
 	l.Info().Msg("Engine: Image sources initialized")
+}
 
+func ensureDefaultUser(ctx context.Context, l *zerolog.Logger, store db.DB) error {
 	l.Debug().Msg("Engine: Checking for default user")
 	userCount, _ := store.CountUsers(ctx)
-	if userCount < 1 {
-		l.Info().Msg("Engine: Creating default user")
-		user, err := store.SaveUser(ctx, db.SaveUserOpts{
-			Username: cfg.DefaultUsername(),
-			Password: cfg.DefaultPassword(),
-			Role:     models.UserRoleAdmin,
-		})
-		if err != nil {
-			l.Error().Err(err).Msg("Engine: Failed to save default user in database")
-			return err
-		}
-		apikey, err := utils.GenerateRandomString(48)
-		if err != nil {
-			l.Error().Err(err).Msg("Engine: Failed to generate default API key")
-			return err
-		}
-		label := "Default"
-		_, err = store.SaveApiKey(ctx, db.SaveApiKeyOpts{
-			Key:    apikey,
-			UserID: user.ID,
-			Label:  label,
-		})
-		if err != nil {
-			l.Error().Err(err).Msg("Engine: Failed to save default API key in database")
-			return err
-		}
-		l.Info().Msgf("Engine: Default user created. Login: %s : %s", cfg.DefaultUsername(), cfg.DefaultPassword())
+	if userCount >= 1 {
+		return nil
 	}
 
+	l.Info().Msg("Engine: Creating default user")
+	user, err := store.SaveUser(ctx, db.SaveUserOpts{
+		Username: cfg.DefaultUsername(),
+		Password: cfg.DefaultPassword(),
+		Role:     models.UserRoleAdmin,
+	})
+	if err != nil {
+		l.Error().Err(err).Msg("Engine: Failed to save default user in database")
+		return err
+	}
+
+	apiKey, err := utils.GenerateRandomString(48)
+	if err != nil {
+		l.Error().Err(err).Msg("Engine: Failed to generate default API key")
+		return err
+	}
+
+	label := "Default"
+	_, err = store.SaveApiKey(ctx, db.SaveApiKeyOpts{
+		Key:    apiKey,
+		UserID: user.ID,
+		Label:  label,
+	})
+	if err != nil {
+		l.Error().Err(err).Msg("Engine: Failed to save default API key in database")
+		return err
+	}
+
+	l.Info().Msgf("Engine: Default user created. Login: %s : %s", cfg.DefaultUsername(), cfg.DefaultPassword())
+	return nil
+}
+
+func logHostConfiguration(l *zerolog.Logger) {
 	l.Debug().Msg("Engine: Checking allowed hosts configuration")
-	if cfg.AllowAllHosts() {
+	switch {
+	case cfg.AllowAllHosts():
 		l.Warn().Msg("Engine: Configuration allows requests from all hosts. This is a potential security risk!")
-	} else if len(cfg.AllowedHosts()) == 0 || cfg.AllowedHosts()[0] == "" {
+	case len(cfg.AllowedHosts()) == 0 || cfg.AllowedHosts()[0] == "":
 		l.Warn().Msgf("Engine: No hosts allowed! Did you forget to set the %s variable?", cfg.ALLOWED_HOSTS_ENV)
-	} else {
+	default:
 		l.Info().Msgf("Engine: Allowing hosts: %v", cfg.AllowedHosts())
 	}
+}
 
+func logCORSConfiguration(l *zerolog.Logger) {
 	if len(cfg.AllowedOrigins()) == 0 || cfg.AllowedOrigins()[0] == "" {
 		l.Info().Msgf("Engine: Using default CORS policy")
-	} else {
-		l.Info().Msgf("Engine: CORS policy: Allowing origins: %v", cfg.AllowedOrigins())
+		return
 	}
 
+	l.Info().Msgf("Engine: CORS policy: Allowing origins: %v", cfg.AllowedOrigins())
+}
+
+func warnOnInvalidListenBrainzRelayConfig(l *zerolog.Logger) {
 	if cfg.LbzRelayEnabled() && (cfg.LbzRelayUrl() == "" || cfg.LbzRelayToken() == "") {
 		l.Warn().Msg("You have enabled ListenBrainz relay, but either the URL or token is missing. Double check your configuration to make sure it is correct!")
 	}
+}
 
+func startHTTPServer(l *zerolog.Logger, store db.DB, mbzC mbz.MusicBrainzCaller) (*http.Server, chan error, error) {
 	l.Debug().Msg("Engine: Setting up HTTP server")
 	var ready atomic.Bool
 	mux := chi.NewRouter()
@@ -208,7 +290,7 @@ func Run(
 	mux.Use(middleware.AllowedHosts)
 	if err := bindRoutes(mux, &ready, store, mbzC); err != nil {
 		l.Error().Err(err).Msg("Engine: Failed to bind routes")
-		return err
+		return nil, nil, err
 	}
 
 	httpServer := &http.Server{
@@ -225,6 +307,10 @@ func Run(
 		}
 	}()
 
+	return httpServer, serverErr, nil
+}
+
+func startBackgroundTasks(ctx context.Context, l *zerolog.Logger, store db.DB, mbzC mbz.MusicBrainzCaller) {
 	l.Info().Msg("Engine: Beginning startup tasks...")
 
 	l.Debug().Msg("Engine: Checking import configuration")
@@ -242,11 +328,10 @@ func Run(
 	go catalog.FetchMissingArtistImages(ctx, store)
 	l.Info().Msg("Engine: Attempting to fetch missing album images")
 	go catalog.FetchMissingAlbumImages(ctx, store)
-
 	l.Info().Msg("Engine: Initialization finished")
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+}
 
+func waitForShutdown(l *zerolog.Logger, quit <-chan os.Signal, serverErr <-chan error) error {
 	var runErr error
 	select {
 	case err := <-serverErr:
@@ -255,9 +340,13 @@ func Run(
 	case <-quit:
 		l.Info().Msg("Engine: Received server shutdown notice")
 	}
+	return runErr
+}
 
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+func shutdown(parentCtx context.Context, l *zerolog.Logger, httpServer *http.Server, mbzC mbz.MusicBrainzCaller, runErr error) error {
+	ctx, cancel := context.WithTimeout(parentCtx, 10*time.Second)
 	defer cancel()
+
 	l.Info().Msg("Engine: Waiting for all processes to finish")
 	mbzC.Shutdown()
 	if err := httpServer.Shutdown(ctx); err != nil {
