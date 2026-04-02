@@ -199,7 +199,7 @@ func buildSubmitListenOpts(
 	ctx context.Context,
 	store db.DB,
 	mbzc mbz.MusicBrainzCaller,
-	userID uuid.UUID,
+	userID int32,
 	listenType LbzListenType,
 	payload LbzSubmitListenPayload,
 	l *zerolog.Logger,
