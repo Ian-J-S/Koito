@@ -4,12 +4,14 @@ import { imageUrl, type RewindStats } from "api/api";
 import { useEffect, useState } from "react";
 import type { LoaderFunctionArgs } from "react-router";
 import { useLoaderData } from "react-router";
-import { getRewindParams, getRewindYear } from "~/utils/utils";
+import { getRewindParams } from "~/utils/utils";
 import { useNavigate } from "react-router";
 import { average } from "color.js";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { getNextMonth,getPrevMonth,getNextYear,getPrevYear,isPrevMonthDisabled,isNextMonthDisabled,isPrevYearDisabled,isNextYearDisabled,} from "./rewindDateNavigation";
 
 // TODO: Bind year and month selectors to what data actually exists
+
 
 const months = [
   "Full Year",
@@ -46,9 +48,9 @@ export async function clientLoader({ request }: LoaderFunctionArgs) {
 
 export default function RewindPage() {
   const currentParams = new URLSearchParams(location.search);
-  let year =
+  const year =
     parseInt(currentParams.get("year") || "0") || getRewindParams().year;
-  let month =
+  const month =
     parseInt(currentParams.get("month") || "0") || getRewindParams().month;
   const navigate = useNavigate();
   const [showTime, setShowTime] = useState(false);
@@ -86,34 +88,23 @@ export default function RewindPage() {
   };
 
   const navigateMonth = (direction: "prev" | "next") => {
-    if (direction === "next") {
-      if (month === 12) {
-        month = 0;
-      } else {
-        month += 1;
-      }
-    } else {
-      if (month === 0) {
-        month = 12;
-      } else {
-        month -= 1;
-      }
-    }
+    const result =
+      direction === "next"
+        ? getNextMonth(year, month)
+        : getPrevMonth(year, month);
 
     updateParams({
-      year: year.toString(),
-      month: month.toString(),
+      year: result.year.toString(),
+      month: result.month.toString(),
     });
   };
+
   const navigateYear = (direction: "prev" | "next") => {
-    if (direction === "next") {
-      year += 1;
-    } else {
-      year -= 1;
-    }
+    const newYear =
+      direction === "next" ? getNextYear(year) : getPrevYear(year);
 
     updateParams({
-      year: year.toString(),
+      year: newYear.toString(),
       month: month.toString(),
     });
   };
@@ -139,12 +130,7 @@ export default function RewindPage() {
                 <button
                   onClick={() => navigateMonth("prev")}
                   className="p-2 disabled:text-(--color-fg-tertiary)"
-                  disabled={
-                    // Previous month is in the future OR
-                    new Date(year, month - 2) > new Date() ||
-                    // We are looking at current year and prev would take us to full year
-                    (new Date().getFullYear() === year && month === 1)
-                  }
+                  disabled={isPrevMonthDisabled(year, month)}
                 >
                   <ChevronLeft size={20} />
                 </button>
@@ -154,7 +140,7 @@ export default function RewindPage() {
                 <button
                   onClick={() => navigateMonth("next")}
                   className="p-2 disabled:text-(--color-fg-tertiary)"
-                  disabled={new Date(year, month) > new Date()}
+                  disabled={isNextMonthDisabled(year, month)}
                 >
                   <ChevronRight size={20} />
                 </button>
@@ -163,7 +149,7 @@ export default function RewindPage() {
                 <button
                   onClick={() => navigateYear("prev")}
                   className="p-2 disabled:text-(--color-fg-tertiary)"
-                  disabled={new Date(year - 1, month) > new Date()}
+                  disabled={isPrevYearDisabled(year, month)}
                 >
                   <ChevronLeft size={20} />
                 </button>
@@ -171,15 +157,7 @@ export default function RewindPage() {
                 <button
                   onClick={() => navigateYear("next")}
                   className="p-2 disabled:text-(--color-fg-tertiary)"
-                  disabled={
-                    // Next year date is in the future OR
-                    new Date(year + 1, month - 1) > new Date() ||
-                    // Next year date is current full year OR
-                    (month == 0 && new Date().getFullYear() === year + 1) ||
-                    // Next year date is current month
-                    (new Date().getMonth() === month - 1 &&
-                      new Date().getFullYear() === year + 1)
-                  }
+                  disabled={isNextYearDisabled(year, month)}
                 >
                   <ChevronRight size={20} />
                 </button>
