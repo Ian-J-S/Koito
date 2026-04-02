@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -24,7 +25,7 @@ func bindRoutes(
 	ready *atomic.Bool,
 	db db.DB,
 	mbz mbz.MusicBrainzCaller,
-) {
+) error {
 	if !(len(cfg.AllowedOrigins()) == 0) && !(cfg.AllowedOrigins()[0] == "") {
 		r.Use(cors.Handler(cors.Options{
 			AllowedOrigins: cfg.AllowedOrigins(),
@@ -124,18 +125,23 @@ func bindRoutes(
 	// serve react client
 	workDir, _ := os.Getwd()
 	filesDir := http.Dir(filepath.Join(workDir, "client/build/client"))
-	fileServer(r, "/", filesDir)
+	if err := fileServer(r, "/", filesDir); err != nil {
+		return err
+	}
 
 	// serve client public files
 	filesDir = http.Dir(filepath.Join(workDir, "client/public"))
-	publicServer(r, "/public", filesDir)
+	if err := publicServer(r, "/public", filesDir); err != nil {
+		return err
+	}
+	return nil
 }
 
 // FileServer conveniently sets up a http.FileServer handler to serve
 // static files from a http.FileSystem.
-func fileServer(r chi.Router, path string, root http.FileSystem) {
+func fileServer(r chi.Router, path string, root http.FileSystem) error {
 	if strings.ContainsAny(path, "{}*") {
-		panic("FileServer does not permit any URL parameters.")
+		return fmt.Errorf("FileServer does not permit any URL parameters")
 	}
 
 	// Serve static files
@@ -152,15 +158,17 @@ func fileServer(r chi.Router, path string, root http.FileSystem) {
 		// Serve file normally
 		fs.ServeHTTP(w, r)
 	})
+	return nil
 }
 
-func publicServer(r chi.Router, path string, root http.FileSystem) {
+func publicServer(r chi.Router, path string, root http.FileSystem) error {
 	if strings.ContainsAny(path, "{}*") {
-		panic("FileServer does not permit any URL parameters.")
+		return fmt.Errorf("FileServer does not permit any URL parameters")
 	}
 	fs := http.FileServer(root)
 	r.Get(path+"*", func(w http.ResponseWriter, r *http.Request) {
 		r.URL.Path = strings.TrimPrefix(r.URL.Path, path)
 		fs.ServeHTTP(w, r)
 	})
+	return nil
 }
