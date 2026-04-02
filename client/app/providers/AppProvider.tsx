@@ -24,9 +24,7 @@ export const useAppContext = () => {
 
 export const AppProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User | null | undefined>(undefined);
-  const [defaultTheme, setDefaultTheme] = useState<string | undefined>(
-    undefined
-  );
+  const [defaultTheme, setDefaultTheme] = useState<string>('yuu');
   const [configurableHomeActivity, setConfigurableHomeActivity] = useState<boolean>(false);
   const [homeItems, setHomeItems] = useState<number>(0);
 

@@ -99,16 +99,16 @@ export default function LastPlays(props: Props) {
                 Now Playing
               </td>
               <td className="text-ellipsis overflow-hidden max-w-[400px] sm:max-w-[600px]">
-                {props.hideArtists ? null : (
+                {props.hideArtists || !npData.track || !npData.track.artists ? null : (
                   <>
                     <ArtistLinks artists={npData.track.artists} /> –{" "}
                   </>
                 )}
                 <Link
                   className="hover:text-[--color-fg-secondary]"
-                  to={`/track/${npData.track.id}`}
+                  to={`/track/${npData.track?.id}`}
                 >
-                  {npData.track.title}
+                  {npData.track?.title || "Unknown Track"}
                 </Link>
               </td>
             </tr>
@@ -135,16 +135,16 @@ export default function LastPlays(props: Props) {
                 {timeSince(new Date(item.time))}
               </td>
               <td className="text-ellipsis overflow-hidden max-w-[400px] sm:max-w-[600px]">
-                {props.hideArtists ? null : (
+                {props.hideArtists || !item.track || !item.track.artists ? null : (
                   <>
                     <ArtistLinks artists={item.track.artists} /> –{" "}
                   </>
                 )}
                 <Link
                   className="hover:text-[--color-fg-secondary]"
-                  to={`/track/${item.track.id}`}
+                  to={`/track/${item.track?.id}`}
                 >
-                  {item.track.title}
+                  {item.track?.title || "Unknown Track"}
                 </Link>
               </td>
             </tr>

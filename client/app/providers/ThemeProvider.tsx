@@ -5,7 +5,7 @@ import {
   useCallback,
   type ReactNode,
 } from "react";
-import { type Theme, themes } from "~/styles/themes.css";
+import { type Theme, themes } from "~/styles/themes.css.ts";
 import { themeVars } from "~/styles/vars.css";
 import { useAppContext } from "./AppProvider";
 
