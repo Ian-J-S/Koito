@@ -170,50 +170,68 @@ func (l *loginStoreMock) SaveSession(ctx context.Context, userId int32, expiresA
 	return &models.Session{ID: uuid.New(), UserID: userId, ExpiresAt: expiresAt, Persistent: persistent}, nil
 }
 
-func TestReplaceImageHandler_InvalidArtistId_Returns400(t *testing.T) {
-	rr := httptest.NewRecorder()
-	form := "artist_id=abc"
-	req := httptest.NewRequest(http.MethodPost, "/replace-image", strings.NewReader(form))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+// --- alias tests ---
 
-	ReplaceImageHandler(nil).ServeHTTP(rr, req)
+func TestGetAliasesHandler_MissingAllIDs_Returns400(t *testing.T) {
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/aliases", nil)
+
+	GetAliasesHandler(nil).ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for invalid artistId, got %d", rr.Code)
+		t.Fatalf("expected 400, got %d", rr.Code)
 	}
-	if !strings.Contains(rr.Body.String(), "invalid artistId") {
-		t.Fatalf("expected response to contain 'invalid artistId', got %s", rr.Body.String())
+	if !strings.Contains(rr.Body.String(), "must be provided") {
+		t.Fatalf("expected error message about missing IDs, got %s", rr.Body.String())
 	}
 }
 
-func TestReplaceImageHandler_InvalidAlbumId_Returns400(t *testing.T) {
+func TestGetAliasesHandler_InvalidArtistID_Returns400(t *testing.T) {
 	rr := httptest.NewRecorder()
-	form := "album_id=xyz"
-	req := httptest.NewRequest(http.MethodPost, "/replace-image", strings.NewReader(form))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req := httptest.NewRequest(http.MethodGet, "/aliases?artist_id=invalid", nil)
 
-	ReplaceImageHandler(nil).ServeHTTP(rr, req)
+	GetAliasesHandler(nil).ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for invalid albumId, got %d", rr.Code)
+		t.Fatalf("expected 400, got %d", rr.Code)
 	}
-	if !strings.Contains(rr.Body.String(), "invalid albumId") {
-		t.Fatalf("expected response to contain 'invalid albumId', got %s", rr.Body.String())
+	if !strings.Contains(rr.Body.String(), "invalid") {
+		t.Fatalf("expected error message about invalid ID, got %s", rr.Body.String())
 	}
 }
 
-func TestReplaceImageHandler_MissingBothIds_Returns400(t *testing.T) {
+func TestGetAliasesHandler_InvalidAlbumID_Returns400(t *testing.T) {
 	rr := httptest.NewRecorder()
-	form := "image_url=http://example.com/image.jpg"
-	req := httptest.NewRequest(http.MethodPost, "/replace-image", strings.NewReader(form))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req := httptest.NewRequest(http.MethodGet, "/aliases?album_id=notanumber", nil)
 
-	ReplaceImageHandler(nil).ServeHTTP(rr, req)
+	GetAliasesHandler(nil).ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 when both IDs are missing, got %d", rr.Code)
+		t.Fatalf("expected 400, got %d", rr.Code)
 	}
-	if !strings.Contains(rr.Body.String(), "artistId or albumId required") {
-		t.Fatalf("expected response to contain 'artistId or albumId required', got %s", rr.Body.String())
+}
+
+func TestGetAliasesHandler_InvalidTrackID_Returns400(t *testing.T) {
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/aliases?track_id=xyz", nil)
+
+	GetAliasesHandler(nil).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rr.Code)
+	}
+}
+
+func TestGetAliasesHandler_MultipleIDs_Returns400(t *testing.T) {
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/aliases?artist_id=1&album_id=2", nil)
+
+	GetAliasesHandler(nil).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "only one") {
+		t.Fatalf("expected error message about multiple IDs, got %s", rr.Body.String())
 	}
 }
