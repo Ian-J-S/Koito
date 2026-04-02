@@ -58,10 +58,10 @@ export default function ChartLayout<T>({
 
     for (const key in params) {
       const val = params[key];
-      if (val !== null) {
-        nextParams.set(key, val);
-      } else {
+      if (val === null) {
         nextParams.delete(key);
+      } else {
+        nextParams.set(key,val);
       }
     }
 
