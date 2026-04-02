@@ -11,8 +11,8 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/gabehf/koito/engine/middleware"
-	"github.com/gabehf/koito/internal/models"
 	"github.com/gabehf/koito/internal/db"
+	"github.com/gabehf/koito/internal/models"
 	"github.com/google/uuid"
 )
 
@@ -59,78 +59,59 @@ func TestMeHandler_Success(t *testing.T) {
 	}
 }
 
-func TestGetArtistHandler_MissingID_Returns400(t *testing.T) {
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/artist", nil)
-
-	// Handler will validate query param before touching the store; pass nil
-	http.HandlerFunc(GetArtistHandler(nil)).ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d", rr.Code)
+func assertStatusAndContains(t *testing.T, rr *httptest.ResponseRecorder, code int, contains string) {
+	t.Helper()
+	if rr.Code != code {
+		t.Fatalf("expected %d, got %d", code, rr.Code)
+	}
+	if contains != "" && !strings.Contains(rr.Body.String(), contains) {
+		t.Fatalf("expected body to contain %q, got %s", contains, rr.Body.String())
 	}
 }
 
-func TestGetArtistHandler_InvalidID_Returns400(t *testing.T) {
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/artist?id=abc", nil)
+func TestGetArtistHandler(t *testing.T) {
+	tests := []struct {
+		name            string
+		url             string
+		store           ArtistStore
+		expectedCode    int
+		expectedContain string
+	}{
+		{"MissingID", "/artist", nil, http.StatusBadRequest, ""},
+		{"InvalidID", "/artist?id=abc", nil, http.StatusBadRequest, ""},
+		{"Success", "/artist?id=5", artistStoreMock{}, http.StatusOK, "Test Artist"},
+	}
 
-	http.HandlerFunc(GetArtistHandler(nil)).ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for invalid id, got %d", rr.Code)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rr := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, tc.url, nil)
+			http.HandlerFunc(GetArtistHandler(tc.store)).ServeHTTP(rr, req)
+			assertStatusAndContains(t, rr, tc.expectedCode, tc.expectedContain)
+		})
 	}
 }
 
-func TestGetTrackHandler_MissingID_Returns400(t *testing.T) {
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/track", nil)
-
-	http.HandlerFunc(GetTrackHandler(nil)).ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d", rr.Code)
+func TestGetTrackHandler(t *testing.T) {
+	tests := []struct {
+		name            string
+		url             string
+		store           TrackStore
+		expectedCode    int
+		expectedContain string
+	}{
+		{"MissingID", "/track", nil, http.StatusBadRequest, ""},
+		{"InvalidID", "/track?id=xyz", nil, http.StatusBadRequest, ""},
+		{"Success", "/track?id=7", trackStoreMock{}, http.StatusOK, "Test Track"},
 	}
-}
 
-func TestGetTrackHandler_InvalidID_Returns400(t *testing.T) {
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/track?id=xyz", nil)
-
-	http.HandlerFunc(GetTrackHandler(nil)).ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for invalid id, got %d", rr.Code)
-	}
-}
-
-func TestGetArtistHandler_Success(t *testing.T) {
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/artist?id=5", nil)
-
-	mock := artistStoreMock{}
-	http.HandlerFunc(GetArtistHandler(mock)).ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rr.Code)
-	}
-	if !strings.Contains(rr.Body.String(), "Test Artist") {
-		t.Fatalf("expected body to contain artist name, got %s", rr.Body.String())
-	}
-}
-
-func TestGetTrackHandler_Success(t *testing.T) {
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/track?id=7", nil)
-
-	mock := trackStoreMock{}
-	http.HandlerFunc(GetTrackHandler(mock)).ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rr.Code)
-	}
-	if !strings.Contains(rr.Body.String(), "Test Track") {
-		t.Fatalf("expected body to contain track title, got %s", rr.Body.String())
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rr := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, tc.url, nil)
+			http.HandlerFunc(GetTrackHandler(tc.store)).ServeHTTP(rr, req)
+			assertStatusAndContains(t, rr, tc.expectedCode, tc.expectedContain)
+		})
 	}
 }
 
@@ -166,16 +147,19 @@ func TestLoginHandler_Success(t *testing.T) {
 // --- minimal mocks ---
 
 type artistStoreMock struct{}
+
 func (artistStoreMock) GetArtist(ctx context.Context, opts db.GetArtistOpts) (*models.Artist, error) {
 	return &models.Artist{ID: opts.ID, Name: "Test Artist"}, nil
 }
 
 type trackStoreMock struct{}
+
 func (trackStoreMock) GetTrack(ctx context.Context, opts db.GetTrackOpts) (*models.Track, error) {
 	return &models.Track{ID: opts.ID, Title: "Test Track"}, nil
 }
 
 type loginStoreMock struct{ user *models.User }
+
 func (l *loginStoreMock) GetUserByUsername(ctx context.Context, username string) (*models.User, error) {
 	if l.user != nil && l.user.Username == username {
 		return l.user, nil
@@ -184,4 +168,52 @@ func (l *loginStoreMock) GetUserByUsername(ctx context.Context, username string)
 }
 func (l *loginStoreMock) SaveSession(ctx context.Context, userId int32, expiresAt time.Time, persistent bool) (*models.Session, error) {
 	return &models.Session{ID: uuid.New(), UserID: userId, ExpiresAt: expiresAt, Persistent: persistent}, nil
+}
+
+func TestReplaceImageHandler_InvalidArtistId_Returns400(t *testing.T) {
+	rr := httptest.NewRecorder()
+	form := "artist_id=abc"
+	req := httptest.NewRequest(http.MethodPost, "/replace-image", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	ReplaceImageHandler(nil).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid artistId, got %d", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "invalid artistId") {
+		t.Fatalf("expected response to contain 'invalid artistId', got %s", rr.Body.String())
+	}
+}
+
+func TestReplaceImageHandler_InvalidAlbumId_Returns400(t *testing.T) {
+	rr := httptest.NewRecorder()
+	form := "album_id=xyz"
+	req := httptest.NewRequest(http.MethodPost, "/replace-image", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	ReplaceImageHandler(nil).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid albumId, got %d", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "invalid albumId") {
+		t.Fatalf("expected response to contain 'invalid albumId', got %s", rr.Body.String())
+	}
+}
+
+func TestReplaceImageHandler_MissingBothIds_Returns400(t *testing.T) {
+	rr := httptest.NewRecorder()
+	form := "image_url=http://example.com/image.jpg"
+	req := httptest.NewRequest(http.MethodPost, "/replace-image", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	ReplaceImageHandler(nil).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 when both IDs are missing, got %d", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "artistId or albumId required") {
+		t.Fatalf("expected response to contain 'artistId or albumId required', got %s", rr.Body.String())
+	}
 }

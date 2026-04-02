@@ -31,7 +31,12 @@ func SearchHandler(store db.DB) http.HandlerFunc {
 
 		if strings.HasPrefix(q, "id:") {
 			idStr := strings.TrimPrefix(q, "id:")
-			id, _ := strconv.Atoi(idStr)
+			id, err := strconv.Atoi(idStr)
+			if err != nil {
+				l.Debug().AnErr("error", err).Msg("SearchHandler: Invalid ID in search query")
+				utils.WriteError(w, "invalid id: search format", http.StatusBadRequest)
+				return
+			}
 
 			artist, err := store.GetArtist(ctx, db.GetArtistOpts{ID: int32(id)})
 			if err != nil {
