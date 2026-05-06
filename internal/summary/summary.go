@@ -8,6 +8,22 @@ import (
 	"github.com/gabehf/koito/internal/models"
 )
 
+type SummaryRepository interface {
+	GetTopArtistsPaginated(ctx context.Context, opts db.GetItemsOpts) (*db.PaginatedResponse[db.RankedItem[*models.Artist]], error)
+	GetTopAlbumsPaginated(ctx context.Context, opts db.GetItemsOpts) (*db.PaginatedResponse[db.RankedItem[*models.Album]], error)
+	GetTopTracksPaginated(ctx context.Context, opts db.GetItemsOpts) (*db.PaginatedResponse[db.RankedItem[*models.Track]], error)
+	CountTimeListenedToItem(ctx context.Context, opts db.TimeListenedOpts) (int64, error)
+	CountListensToItem(ctx context.Context, opts db.TimeListenedOpts) (int64, error)
+	CountTimeListened(ctx context.Context, timeframe db.Timeframe) (int64, error)
+	CountListens(ctx context.Context, timeframe db.Timeframe) (int64, error)
+	CountTracks(ctx context.Context, timeframe db.Timeframe) (int64, error)
+	CountAlbums(ctx context.Context, timeframe db.Timeframe) (int64, error)
+	CountArtists(ctx context.Context, timeframe db.Timeframe) (int64, error)
+	CountNewTracks(ctx context.Context, timeframe db.Timeframe) (int64, error)
+	CountNewAlbums(ctx context.Context, timeframe db.Timeframe) (int64, error)
+	CountNewArtists(ctx context.Context, timeframe db.Timeframe) (int64, error)
+}
+
 type Summary struct {
 	Title            string                          `json:"title,omitempty"`
 	TopArtists       []db.RankedItem[*models.Artist] `json:"top_artists"` // ListenCount and TimeListened are overridden with stats from timeframe
@@ -31,7 +47,7 @@ type GenerateSummaryOpts struct {
 	Title     string
 }
 
-func GenerateSummary(ctx context.Context, store db.DB, opts GenerateSummaryOpts) (summary *Summary, err error) {
+func GenerateSummary(ctx context.Context, store SummaryRepository, opts GenerateSummaryOpts) (summary *Summary, err error) {
 	userId := opts.UserID
 	timeframe := opts.Timeframe
 	title := opts.Title
