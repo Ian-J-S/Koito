@@ -1,8 +1,9 @@
 package handlers
 
 import (
+	"context"
+	"errors"
 	"net/http"
-	"strconv"
 
 	"github.com/gabehf/koito/internal/db"
 	"github.com/gabehf/koito/internal/logger"
@@ -40,6 +41,7 @@ func UpdateMbzIdHandler(store db.DB) func(w http.ResponseWriter, r *http.Request
 			utils.WriteError(w, "only one of artist_id, album_id, or track_id can be provided at a time", http.StatusBadRequest)
 			return
 		}
+
 		var mbzid uuid.UUID
 		if mbzid, err = uuid.Parse(mbzidStr); err != nil {
 			l.Debug().Msg("UpdateMbzIdHandler: Provided MusicBrainz ID is invalid")
@@ -47,59 +49,40 @@ func UpdateMbzIdHandler(store db.DB) func(w http.ResponseWriter, r *http.Request
 			return
 		}
 
-		if artistIDStr != "" {
-			var artistID int
-			artistID, err = strconv.Atoi(artistIDStr)
-			if err != nil {
-				l.Debug().AnErr("error", err).Msg("UpdateMbzIdHandler: Invalid artist id")
-				utils.WriteError(w, "invalid artist_id", http.StatusBadRequest)
-				return
-			}
-			err = store.UpdateArtist(ctx, db.UpdateArtistOpts{
-				ID:            int32(artistID),
-				MusicBrainzID: mbzid,
-			})
-			if err != nil {
-				l.Error().Err(err).Msg("UpdateMbzIdHandler: Failed to update musicbrainz id")
-				utils.WriteError(w, "failed to update musicbrainz id", http.StatusInternalServerError)
-				return
-			}
-		} else if albumIDStr != "" {
-			var albumID int
-			albumID, err = strconv.Atoi(albumIDStr)
-			if err != nil {
-				l.Debug().AnErr("error", err).Msg("UpdateMbzIdHandler: Invalid album id")
-				utils.WriteError(w, "invalid artist_id", http.StatusBadRequest)
-				return
-			}
-			err = store.UpdateAlbum(ctx, db.UpdateAlbumOpts{
-				ID:            int32(albumID),
-				MusicBrainzID: mbzid,
-			})
-			if err != nil {
-				l.Error().Err(err).Msg("UpdateMbzIdHandler: Failed to update musicbrainz id")
-				utils.WriteError(w, "failed to update musicbrainz id", http.StatusInternalServerError)
-				return
-			}
-		} else if trackIDStr != "" {
-			var trackID int
-			trackID, err = strconv.Atoi(trackIDStr)
-			if err != nil {
-				l.Debug().AnErr("error", err).Msg("UpdateMbzIdHandler: Invalid track id")
-				utils.WriteError(w, "invalid artist_id", http.StatusBadRequest)
-				return
-			}
-			err = store.UpdateTrack(ctx, db.UpdateTrackOpts{
-				ID:            int32(trackID),
-				MusicBrainzID: mbzid,
-			})
-			if err != nil {
-				l.Error().Err(err).Msg("UpdateMbzIdHandler: Failed to update musicbrainz id")
-				utils.WriteError(w, "failed to update musicbrainz id", http.StatusInternalServerError)
-				return
-			}
+		et, id, msg, err := parseIDParams(artistIDStr, albumIDStr, trackIDStr)
+		if err != nil {
+			l.Debug().AnErr("error", err).Msg("UpdateMbzIdHandler: parameter validation failed")
+			utils.WriteError(w, msg, http.StatusBadRequest)
+			return
+		}
+
+		if err = updateMusicBrainID(ctx, store, et, id, mbzid); err != nil {
+			l.Error().Err(err).Msg("UpdateMbzIdHandler: Failed to update musicbrainz id")
+			utils.WriteError(w, "failed to update musicbrainz id", http.StatusInternalServerError)
+			return
 		}
 
 		w.WriteHeader(http.StatusNoContent)
 	}
+}
+
+func updateMusicBrainID(ctx context.Context, store db.DB, et entityType, id int32, mbzid uuid.UUID) error {
+	switch et {
+	case entityAlbum:
+		return store.UpdateAlbum(ctx, db.UpdateAlbumOpts{
+			ID:            id,
+			MusicBrainzID: mbzid,
+		})
+	case entityArtist:
+		return store.UpdateArtist(ctx, db.UpdateArtistOpts{
+			ID:            id,
+			MusicBrainzID: mbzid,
+		})
+	case entityTrack:
+		return store.UpdateTrack(ctx, db.UpdateTrackOpts{
+			ID:            id,
+			MusicBrainzID: mbzid,
+		})
+	}
+	return errors.New("unknown entity type")
 }
