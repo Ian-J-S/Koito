@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path"
 	"strings"
 	"time"
 
@@ -32,45 +30,60 @@ type MalojaTrack struct {
 	} `json:"album"`
 }
 
-func ImportMalojaFile(ctx context.Context, store db.DB, filename string) error {
-	l := logger.FromContext(ctx)
-	l.Info().Msgf("Beginning maloja import on file: %s", filename)
-	file, err := os.Open(path.Join(cfg.ConfigDir(), "import", filename))
-	if err != nil {
-		l.Err(err).Msgf("Failed to read import file: %s", filename)
-		return fmt.Errorf("ImportMalojaFile: %w", err)
-	}
-	defer file.Close()
-	var throttleFunc = func() {}
-	if ms := cfg.ThrottleImportMs(); ms > 0 {
-		throttleFunc = func() {
-			time.Sleep(time.Duration(ms) * time.Millisecond)
-		}
-	}
+// MalojaImporter implements the Importer interface for Maloja exports.
+type MalojaImporter struct{}
+
+// Name returns the importer source name.
+func (m *MalojaImporter) Name() string {
+	return "maloja"
+}
+
+// ParseRecords parses the Maloja JSON export format.
+func (m *MalojaImporter) ParseRecords(data []byte) (interface{}, error) {
 	export := new(MalojaExport)
-	err = json.NewDecoder(file).Decode(&export)
+	err := json.Unmarshal(data, &export)
 	if err != nil {
-		return fmt.Errorf("ImportMalojaFile: %w", err)
+		return nil, fmt.Errorf("MalojaImporter.ParseRecords: %w", err)
 	}
+	return export, nil
+}
+
+// ProcessRecords iterates over Maloja scrobbles, validates them, and processes valid entries.
+func (m *MalojaImporter) ProcessRecords(ctx context.Context, records interface{}, callback func(opts catalog.SubmitListenOpts) error) (int, error) {
+	l := logger.FromContext(ctx)
+	export, ok := records.(*MalojaExport)
+	if !ok {
+		return 0, fmt.Errorf("MalojaImporter.ProcessRecords: invalid records type")
+	}
+
+	count := 0
 	for _, item := range export.Scrobbles {
-		martists := make([]string, 0)
-		// Maloja has a tendency to have the the artist order ['feature', 'main \u2022 feature'], so
-		// here we try to turn that artist array into ['main', 'feature']
-		item.Track.Artists = utils.MoveFirstMatchToFront(item.Track.Artists, " \u2022 ")
-		for _, an := range item.Track.Artists {
-			ans := strings.Split(an, " \u2022 ")
-			martists = append(martists, ans...)
-		}
-		artists := utils.UniqueIgnoringCase(martists)
+		// Skip invalid scrobbles
 		if len(item.Track.Artists) < 1 || item.Track.Title == "" {
 			l.Debug().Msg("Skipping invalid maloja import item")
 			continue
 		}
+
+		// Parse timestamp
 		ts := time.Unix(item.Time, 0)
+
+		// Check import time window
 		if !inImportTimeWindow(ts) {
 			l.Debug().Msgf("Skipping import due to import time rules")
 			continue
 		}
+
+		// Process artist names: Maloja sometimes has artist arrays like ['feature', 'main • feature'],
+		// so we normalize and deduplicate them.
+		martists := make([]string, 0)
+		artists := item.Track.Artists
+		artists = utils.MoveFirstMatchToFront(artists, " • ")
+		for _, an := range artists {
+			ans := strings.Split(an, " • ")
+			martists = append(martists, ans...)
+		}
+		artists = utils.UniqueIgnoringCase(martists)
+
 		opts := catalog.SubmitListenOpts{
 			MbzCaller:      &mbz.MusicBrainzClient{},
 			Artist:         item.Track.Artists[0],
@@ -82,12 +95,18 @@ func ImportMalojaFile(ctx context.Context, store db.DB, filename string) error {
 			UserID:         1,
 			SkipCacheImage: !cfg.FetchImagesDuringImport(),
 		}
-		err = catalog.SubmitListen(ctx, store, opts)
+
+		err := callback(opts)
 		if err != nil {
-			l.Err(err).Msg("Failed to import maloja playback item")
-			return fmt.Errorf("ImportMalojaFile: %w", err)
+			return count, fmt.Errorf("MalojaImporter.ProcessRecords: %w", err)
 		}
-		throttleFunc()
+		count++
 	}
-	return finishImport(ctx, filename, len(export.Scrobbles))
+
+	return count, nil
+}
+
+// ImportMalojaFile imports a Maloja export file using the template workflow.
+func ImportMalojaFile(ctx context.Context, store db.DB, filename string) error {
+	return ImportWithTemplate(ctx, store, filename, &MalojaImporter{})
 }

@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path"
 	"time"
 
 	"github.com/gabehf/koito/internal/catalog"
@@ -24,57 +22,74 @@ type SpotifyExportItem struct {
 	MsPlayed   int32     `json:"ms_played"`
 }
 
-func ImportSpotifyFile(ctx context.Context, store db.DB, filename string) error {
-	l := logger.FromContext(ctx)
-	l.Info().Msgf("Beginning spotify import on file: %s", filename)
-	file, err := os.Open(path.Join(cfg.ConfigDir(), "import", filename))
-	if err != nil {
-		l.Err(err).Msgf("Failed to read import file: %s", filename)
-		return fmt.Errorf("ImportSpotifyFile: %w", err)
-	}
-	defer file.Close()
-	var throttleFunc = func() {}
-	if ms := cfg.ThrottleImportMs(); ms > 0 {
-		throttleFunc = func() {
-			time.Sleep(time.Duration(ms) * time.Millisecond)
-		}
-	}
+// SpotifyImporter implements the Importer interface for Spotify exports.
+type SpotifyImporter struct{}
+
+// Name returns the importer source name.
+func (s *SpotifyImporter) Name() string {
+	return "spotify"
+}
+
+// ParseRecords parses the Spotify JSON export format.
+func (s *SpotifyImporter) ParseRecords(data []byte) (interface{}, error) {
 	export := make([]SpotifyExportItem, 0)
-	err = json.NewDecoder(file).Decode(&export)
+	err := json.Unmarshal(data, &export)
 	if err != nil {
-		return fmt.Errorf("ImportSpotifyFile: %w", err)
+		return nil, fmt.Errorf("SpotifyImporter.ParseRecords: %w", err)
+	}
+	return export, nil
+}
+
+// ProcessRecords iterates over Spotify export items, validates them, and processes valid entries.
+func (s *SpotifyImporter) ProcessRecords(ctx context.Context, records interface{}, callback func(opts catalog.SubmitListenOpts) error) (int, error) {
+	l := logger.FromContext(ctx)
+	export, ok := records.([]SpotifyExportItem)
+	if !ok {
+		return 0, fmt.Errorf("SpotifyImporter.ProcessRecords: invalid records type")
 	}
 
+	count := 0
 	for _, item := range export {
+		// Skip items that weren't fully played
 		if item.ReasonEnd != "trackdone" {
 			continue
 		}
+
+		// Check import time window
 		if !inImportTimeWindow(item.Timestamp) {
 			l.Debug().Msgf("Skipping import due to import time rules")
 			continue
 		}
-		dur := item.MsPlayed
+
+		// Skip invalid tracks
 		if item.TrackName == "" || item.ArtistName == "" {
 			l.Debug().Msg("Skipping non-track item")
 			continue
 		}
+
 		opts := catalog.SubmitListenOpts{
 			MbzCaller:      &mbz.MusicBrainzClient{},
 			Artist:         item.ArtistName,
 			TrackTitle:     item.TrackName,
 			ReleaseTitle:   item.AlbumName,
-			Duration:       dur / 1000,
+			Duration:       item.MsPlayed / 1000,
 			Time:           item.Timestamp,
 			Client:         "spotify",
 			UserID:         1,
 			SkipCacheImage: !cfg.FetchImagesDuringImport(),
 		}
-		err = catalog.SubmitListen(ctx, store, opts)
+
+		err := callback(opts)
 		if err != nil {
-			l.Err(err).Msg("Failed to import spotify playback item")
-			return fmt.Errorf("ImportSpotifyFile: %w", err)
+			return count, fmt.Errorf("SpotifyImporter.ProcessRecords: %w", err)
 		}
-		throttleFunc()
+		count++
 	}
-	return finishImport(ctx, filename, len(export))
+
+	return count, nil
+}
+
+// ImportSpotifyFile imports a Spotify export file using the template workflow.
+func ImportSpotifyFile(ctx context.Context, store db.DB, filename string) error {
+	return ImportWithTemplate(ctx, store, filename, &SpotifyImporter{})
 }
