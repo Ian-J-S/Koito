@@ -16,7 +16,7 @@ func SummaryHandler(store db.DB) http.HandlerFunc {
 		l.Debug().Msg("SummaryHandler: Received request to retrieve summary")
 		timeframe := TimeframeFromRequest(r)
 
-		summary, err := summary.GenerateSummary(ctx, summary.NewSummaryRepository(store), summary.GenerateSummaryOpts{
+		summary, err := summary.GenerateSummary(ctx, store, summary.GenerateSummaryOpts{
 			UserID:    1,
 			Timeframe: timeframe,
 			Title:     "",
