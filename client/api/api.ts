@@ -44,14 +44,20 @@ async function handleJson<T>(r: Response): Promise<T> {
   return (await r.json()) as T;
 }
 
+async function requestJson<T>(
+  url: string,
+  options?: RequestInit
+): Promise<T> {
+  const r = await fetch(url, options);
+  return handleJson<T>(r);
+}
+
 async function getLastListens(
   args: getItemsArgs
 ): Promise<PaginatedResponse<Listen>> {
-  const r = await fetch(
+  return requestJson<PaginatedResponse<Listen>>(
     `/apis/web/v1/listens?period=${args.period}&limit=${args.limit}&artist_id=${args.artist_id}&album_id=${args.album_id}&track_id=${args.track_id}&page=${args.page}`
   );
-
-  return handleJson<PaginatedResponse<Listen>>(r);
 }
 
 async function getTopTracks(
@@ -62,9 +68,7 @@ async function getTopTracks(
   if (args.artist_id) url += `&artist_id=${args.artist_id}`;
   else if (args.album_id) url += `&album_id=${args.album_id}`;
 
-  const r = await fetch(url);
-
-  return handleJson<PaginatedResponse<Ranked<Track>>>(r);
+  return requestJson<PaginatedResponse<Ranked<Track>>>(url);
 }
 
 async function getTopAlbums(
@@ -74,53 +78,37 @@ async function getTopAlbums(
 
   if (args.artist_id) url += `&artist_id=${args.artist_id}`;
 
-  const r = await fetch(url);
-
-  return handleJson<PaginatedResponse<Ranked<Album>>>(r);
+  return requestJson<PaginatedResponse<Ranked<Album>>>(url);
 }
 
 async function getTopArtists(
   args: getItemsArgs
 ): Promise<PaginatedResponse<Ranked<Artist>>> {
   const url = `/apis/web/v1/top-artists?period=${args.period}&limit=${args.limit}&page=${args.page}`;
-
-  const r = await fetch(url);
-
-  return handleJson<PaginatedResponse<Ranked<Artist>>>(r);
+  return requestJson<PaginatedResponse<Ranked<Artist>>>(url);
 }
 
 async function getActivity(
   args: getActivityArgs
 ): Promise<ListenActivityItem[]> {
-  const r = await fetch(
+  return requestJson<ListenActivityItem[]>(
     `/apis/web/v1/listen-activity?step=${args.step}&range=${args.range}&month=${args.month}&year=${args.year}&album_id=${args.album_id}&artist_id=${args.artist_id}&track_id=${args.track_id}`
   );
-
-  return handleJson<ListenActivityItem[]>(r);
 }
 
-async function getInterest(
-  args: getInterestArgs
-): Promise<InterestBucket[]> {
-  const r = await fetch(
+async function getInterest(args: getInterestArgs): Promise<InterestBucket[]> {
+  return requestJson<InterestBucket[]>(
     `/apis/web/v1/interest?buckets=${args.buckets}&album_id=${args.album_id}&artist_id=${args.artist_id}&track_id=${args.track_id}`
   );
-
-  return handleJson<InterestBucket[]>(r);
 }
 
 async function getStats(period: string): Promise<Stats> {
-  const r = await fetch(`/apis/web/v1/stats?period=${period}`);
-
-  return handleJson<Stats>(r);
+  return requestJson<Stats>(`/apis/web/v1/stats?period=${period}`);
 }
 
 function search(q: string): Promise<SearchResponse> {
   q = encodeURIComponent(q);
-
-  return fetch(`/apis/web/v1/search?q=${q}`).then(
-    (r) => r.json() as Promise<SearchResponse>
-  );
+  return requestJson<SearchResponse>(`/apis/web/v1/search?q=${q}`);
 }
 
 function imageUrl(id: string, size: string) {
@@ -170,10 +158,30 @@ function mergeArtists(
   );
 }
 
+function login(
+  username: string,
+  password: string,
+  remember: boolean
+): Promise<Response> {
+  const form = new URLSearchParams();
+  form.append("username", username);
+  form.append("password", password);
+  form.append("remember_me", String(remember));
+
+  return fetch(`/apis/web/v1/login`, {
+    method: "POST",
+    body: form,
+  });
+}
+
+function logout(): Promise<Response> {
+  return fetch(`/apis/web/v1/logout`, {
+    method: "POST",
+  });
+}
+
 function getCfg(): Promise<Config> {
-  return fetch(`/apis/web/v1/config`).then(
-    (r) => r.json() as Promise<Config>
-  );
+  return requestJson<Config>(`/apis/web/v1/config`);
 }
 
 function submitListen(id: string, ts: Date): Promise<Response> {
@@ -193,9 +201,7 @@ function submitListen(id: string, ts: Date): Promise<Response> {
 }
 
 function getApiKeys(): Promise<ApiKey[]> {
-  return fetch(`/apis/web/v1/user/apikeys`).then(
-    (r) => r.json() as Promise<ApiKey[]>
-  );
+  return requestJson<ApiKey[]>(`/apis/web/v1/user/apikeys`);
 }
 
 const createApiKey = async (label: string): Promise<ApiKey> => {
@@ -203,30 +209,10 @@ const createApiKey = async (label: string): Promise<ApiKey> => {
 
   form.append("label", label);
 
-  const r = await fetch(`/apis/web/v1/user/apikeys`, {
+  return requestJson<ApiKey>(`/apis/web/v1/user/apikeys`, {
     method: "POST",
     body: form,
   });
-
-  if (!r.ok) {
-    let errorMessage = `error: ${r.status}`;
-
-    try {
-      const errorData: ApiError = await r.json();
-
-      if (errorData && typeof errorData.error === "string") {
-        errorMessage = errorData.error;
-      }
-    } catch (e) {
-      console.error("unexpected api error:", e);
-    }
-
-    throw new Error(errorMessage);
-  }
-
-  const data: ApiKey = await r.json();
-
-  return data;
 };
 
 function deleteApiKey(id: number): Promise<Response> {
@@ -266,9 +252,7 @@ function updateUser(username: string, password: string) {
 }
 
 function getAliases(type: string, id: number): Promise<Alias[]> {
-  return fetch(`/apis/web/v1/aliases?${type}_id=${id}`).then(
-    (r) => r.json() as Promise<Alias[]>
-  );
+  return requestJson<Alias[]>(`/apis/web/v1/aliases?${type}_id=${id}`);
 }
 
 function createAlias(
@@ -336,9 +320,7 @@ function updateMbzId(
 }
 
 function getAlbum(id: number): Promise<Album> {
-  return fetch(`/apis/web/v1/album?id=${id}`).then(
-    (r) => r.json() as Promise<Album>
-  );
+  return requestJson<Album>(`/apis/web/v1/album?id=${id}`);
 }
 
 function deleteListen(listen: Listen): Promise<Response> {
@@ -353,15 +335,13 @@ function deleteListen(listen: Listen): Promise<Response> {
 function getExport() {}
 
 function getNowPlaying(): Promise<NowPlaying> {
-  return fetch("/apis/web/v1/now-playing").then((r) => r.json());
+  return requestJson<NowPlaying>("/apis/web/v1/now-playing");
 }
 
 async function getRewindStats(args: timeframe): Promise<RewindStats> {
-  const r = await fetch(
+  return requestJson<RewindStats>(
     `/apis/web/v1/summary?week=${args.week}&month=${args.month}&year=${args.year}&from=${args.from}&to=${args.to}`
   );
-
-  return handleJson<RewindStats>(r);
 }
 
 export {
@@ -398,4 +378,164 @@ export {
   submitListen,
   getNowPlaying,
   getRewindStats,
+};
+
+type Track = {
+  id: number;
+  title: string;
+  artists: SimpleArtists[];
+  listen_count: number;
+  image: string;
+  album_id: number;
+  musicbrainz_id: string;
+  time_listened: number;
+  first_listen: number;
+  all_time_rank: number;
+};
+
+type Artist = {
+  id: number;
+  name: string;
+  image: string;
+  aliases: string[];
+  listen_count: number;
+  musicbrainz_id: string;
+  time_listened: number;
+  first_listen: number;
+  is_primary: boolean;
+  all_time_rank: number;
+};
+
+type Album = {
+  id: number;
+  title: string;
+  image: string;
+  listen_count: number;
+  is_various_artists: boolean;
+  artists: SimpleArtists[];
+  musicbrainz_id: string;
+  time_listened: number;
+  first_listen: number;
+  all_time_rank: number;
+};
+
+type Alias = {
+  id: number;
+  alias: string;
+  source: string;
+  is_primary: boolean;
+};
+
+type Listen = {
+  time: string;
+  track: Track;
+};
+
+type PaginatedResponse<T> = {
+  items: T[];
+  total_record_count: number;
+  has_next_page: boolean;
+  current_page: number;
+  items_per_page: number;
+};
+
+type Ranked<T> = {
+  item: T;
+  rank: number;
+};
+
+type ListenActivityItem = {
+  start_time: Date;
+  listens: number;
+};
+
+type InterestBucket = {
+  bucket_start: Date;
+  bucket_end: Date;
+  listen_count: number;
+};
+
+type SimpleArtists = {
+  name: string;
+  id: number;
+};
+
+type Stats = {
+  listen_count: number;
+  track_count: number;
+  album_count: number;
+  artist_count: number;
+  minutes_listened: number;
+};
+
+type SearchResponse = {
+  albums: Album[];
+  artists: Artist[];
+  tracks: Track[];
+};
+
+type User = {
+  id: number;
+  username: string;
+  role: "user" | "admin";
+};
+
+type ApiKey = {
+  id: number;
+  key: string;
+  label: string;
+  created_at: Date;
+};
+
+type ApiError = {
+  error: string;
+};
+
+type Config = {
+  default_theme: string;
+};
+
+type NowPlaying = {
+  currently_playing: boolean;
+  track: Track;
+};
+
+type RewindStats = {
+  title: string;
+  top_artists: Ranked<Artist>[];
+  top_albums: Ranked<Album>[];
+  top_tracks: Ranked<Track>[];
+  minutes_listened: number;
+  avg_minutes_listened_per_day: number;
+  plays: number;
+  avg_plays_per_day: number;
+  unique_tracks: number;
+  unique_albums: number;
+  unique_artists: number;
+  new_tracks: number;
+  new_albums: number;
+  new_artists: number;
+};
+
+export type {
+  getItemsArgs,
+  getActivityArgs,
+  getInterestArgs,
+  Track,
+  Artist,
+  Album,
+  Listen,
+  SearchResponse,
+  PaginatedResponse,
+  Ranked,
+  ListenActivityItem,
+  InterestBucket,
+  User,
+  Alias,
+  ApiKey,
+  ApiError,
+  Config,
+  NowPlaying,
+  Stats,
+  RewindStats,
 };
