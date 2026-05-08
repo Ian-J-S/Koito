@@ -1,3 +1,5 @@
+import { login, logout } from "./authApi";
+
 interface getItemsArgs {
   limit: number;
   period: string;
@@ -6,6 +8,7 @@ interface getItemsArgs {
   album_id?: number;
   track_id?: number;
 }
+
 interface getActivityArgs {
   step: string;
   range: number;
@@ -15,6 +18,7 @@ interface getActivityArgs {
   album_id: number;
   track_id: number;
 }
+
 interface timeframe {
   week?: number;
   month?: number;
@@ -23,6 +27,7 @@ interface timeframe {
   to?: number;
   period?: string;
 }
+
 interface getInterestArgs {
   buckets: number;
   artist_id: number;
@@ -35,14 +40,17 @@ async function handleJson<T>(r: Response): Promise<T> {
     const err = await r.json();
     throw Error(err.error);
   }
+
   return (await r.json()) as T;
 }
+
 async function getLastListens(
   args: getItemsArgs
 ): Promise<PaginatedResponse<Listen>> {
   const r = await fetch(
     `/apis/web/v1/listens?period=${args.period}&limit=${args.limit}&artist_id=${args.artist_id}&album_id=${args.album_id}&track_id=${args.track_id}&page=${args.page}`
   );
+
   return handleJson<PaginatedResponse<Listen>>(r);
 }
 
@@ -55,6 +63,7 @@ async function getTopTracks(
   else if (args.album_id) url += `&album_id=${args.album_id}`;
 
   const r = await fetch(url);
+
   return handleJson<PaginatedResponse<Ranked<Track>>>(r);
 }
 
@@ -62,9 +71,11 @@ async function getTopAlbums(
   args: getItemsArgs
 ): Promise<PaginatedResponse<Ranked<Album>>> {
   let url = `/apis/web/v1/top-albums?period=${args.period}&limit=${args.limit}&page=${args.page}`;
+
   if (args.artist_id) url += `&artist_id=${args.artist_id}`;
 
   const r = await fetch(url);
+
   return handleJson<PaginatedResponse<Ranked<Album>>>(r);
 }
 
@@ -72,7 +83,9 @@ async function getTopArtists(
   args: getItemsArgs
 ): Promise<PaginatedResponse<Ranked<Artist>>> {
   const url = `/apis/web/v1/top-artists?period=${args.period}&limit=${args.limit}&page=${args.page}`;
+
   const r = await fetch(url);
+
   return handleJson<PaginatedResponse<Ranked<Artist>>>(r);
 }
 
@@ -82,13 +95,17 @@ async function getActivity(
   const r = await fetch(
     `/apis/web/v1/listen-activity?step=${args.step}&range=${args.range}&month=${args.month}&year=${args.year}&album_id=${args.album_id}&artist_id=${args.artist_id}&track_id=${args.track_id}`
   );
+
   return handleJson<ListenActivityItem[]>(r);
 }
 
-async function getInterest(args: getInterestArgs): Promise<InterestBucket[]> {
+async function getInterest(
+  args: getInterestArgs
+): Promise<InterestBucket[]> {
   const r = await fetch(
     `/apis/web/v1/interest?buckets=${args.buckets}&album_id=${args.album_id}&artist_id=${args.artist_id}&track_id=${args.track_id}`
   );
+
   return handleJson<InterestBucket[]>(r);
 }
 
@@ -100,6 +117,7 @@ async function getStats(period: string): Promise<Stats> {
 
 function search(q: string): Promise<SearchResponse> {
   q = encodeURIComponent(q);
+
   return fetch(`/apis/web/v1/search?q=${q}`).then(
     (r) => r.json() as Promise<SearchResponse>
   );
@@ -109,8 +127,10 @@ function imageUrl(id: string, size: string) {
   if (!id) {
     id = "default";
   }
+
   return `/images/${size}/${id}`;
 }
+
 function replaceImage(form: FormData): Promise<Response> {
   return fetch(`/apis/web/v1/replace-image`, {
     method: "POST",
@@ -123,6 +143,7 @@ function mergeTracks(from: number, to: number): Promise<Response> {
     method: "POST",
   });
 }
+
 function mergeAlbums(
   from: number,
   to: number,
@@ -135,6 +156,7 @@ function mergeAlbums(
     }
   );
 }
+
 function mergeArtists(
   from: number,
   to: number,
@@ -147,36 +169,23 @@ function mergeArtists(
     }
   );
 }
-function login(
-  username: string,
-  password: string,
-  remember: boolean
-): Promise<Response> {
-  const form = new URLSearchParams();
-  form.append("username", username);
-  form.append("password", password);
-  form.append("remember_me", String(remember));
-  return fetch(`/apis/web/v1/login`, {
-    method: "POST",
-    body: form,
-  });
-}
-function logout(): Promise<Response> {
-  return fetch(`/apis/web/v1/logout`, {
-    method: "POST",
-  });
-}
 
 function getCfg(): Promise<Config> {
-  return fetch(`/apis/web/v1/config`).then((r) => r.json() as Promise<Config>);
+  return fetch(`/apis/web/v1/config`).then(
+    (r) => r.json() as Promise<Config>
+  );
 }
 
 function submitListen(id: string, ts: Date): Promise<Response> {
   const form = new URLSearchParams();
+
   form.append("track_id", id);
+
   const ms = new Date(ts).getTime();
   const unix = Math.floor(ms / 1000);
+
   form.append("unix", unix.toString());
+
   return fetch(`/apis/web/v1/listen`, {
     method: "POST",
     body: form,
@@ -188,37 +197,50 @@ function getApiKeys(): Promise<ApiKey[]> {
     (r) => r.json() as Promise<ApiKey[]>
   );
 }
+
 const createApiKey = async (label: string): Promise<ApiKey> => {
   const form = new URLSearchParams();
+
   form.append("label", label);
+
   const r = await fetch(`/apis/web/v1/user/apikeys`, {
     method: "POST",
     body: form,
   });
+
   if (!r.ok) {
     let errorMessage = `error: ${r.status}`;
+
     try {
       const errorData: ApiError = await r.json();
+
       if (errorData && typeof errorData.error === "string") {
         errorMessage = errorData.error;
       }
     } catch (e) {
       console.error("unexpected api error:", e);
     }
+
     throw new Error(errorMessage);
   }
+
   const data: ApiKey = await r.json();
+
   return data;
 };
+
 function deleteApiKey(id: number): Promise<Response> {
   return fetch(`/apis/web/v1/user/apikeys?id=${id}`, {
     method: "DELETE",
   });
 }
+
 function updateApiKeyLabel(id: number, label: string): Promise<Response> {
   const form = new URLSearchParams();
+
   form.append("id", String(id));
   form.append("label", label);
+
   return fetch(`/apis/web/v1/user/apikeys`, {
     method: "PATCH",
     body: form,
@@ -230,72 +252,89 @@ function deleteItem(itemType: string, id: number): Promise<Response> {
     method: "DELETE",
   });
 }
+
 function updateUser(username: string, password: string) {
   const form = new URLSearchParams();
+
   form.append("username", username);
   form.append("password", password);
+
   return fetch(`/apis/web/v1/user`, {
     method: "PATCH",
     body: form,
   });
 }
+
 function getAliases(type: string, id: number): Promise<Alias[]> {
   return fetch(`/apis/web/v1/aliases?${type}_id=${id}`).then(
     (r) => r.json() as Promise<Alias[]>
   );
 }
+
 function createAlias(
   type: string,
   id: number,
   alias: string
 ): Promise<Response> {
   const form = new URLSearchParams();
+
   form.append(`${type}_id`, String(id));
   form.append("alias", alias);
+
   return fetch(`/apis/web/v1/aliases`, {
     method: "POST",
     body: form,
   });
 }
+
 function deleteAlias(
   type: string,
   id: number,
   alias: string
 ): Promise<Response> {
   const form = new URLSearchParams();
+
   form.append(`${type}_id`, String(id));
   form.append("alias", alias);
+
   return fetch(`/apis/web/v1/aliases/delete`, {
     method: "POST",
     body: form,
   });
 }
+
 function setPrimaryAlias(
   type: string,
   id: number,
   alias: string
 ): Promise<Response> {
   const form = new URLSearchParams();
+
   form.append(`${type}_id`, String(id));
   form.append("alias", alias);
+
   return fetch(`/apis/web/v1/aliases/primary`, {
     method: "POST",
     body: form,
   });
 }
+
 function updateMbzId(
   type: string,
   id: number,
   mbzid: string
 ): Promise<Response> {
   const form = new URLSearchParams();
+
   form.append(`${type}_id`, String(id));
   form.append("mbz_id", mbzid);
+
   return fetch(`/apis/web/v1/mbzid`, {
     method: "PATCH",
     body: form,
   });
 }
+
 function getAlbum(id: number): Promise<Album> {
   return fetch(`/apis/web/v1/album?id=${id}`).then(
     (r) => r.json() as Promise<Album>
@@ -305,10 +344,12 @@ function getAlbum(id: number): Promise<Album> {
 function deleteListen(listen: Listen): Promise<Response> {
   const ms = new Date(listen.time).getTime();
   const unix = Math.floor(ms / 1000);
+
   return fetch(`/apis/web/v1/listen?track_id=${listen.track.id}&unix=${unix}`, {
     method: "DELETE",
   });
 }
+
 function getExport() {}
 
 function getNowPlaying(): Promise<NowPlaying> {
@@ -319,6 +360,7 @@ async function getRewindStats(args: timeframe): Promise<RewindStats> {
   const r = await fetch(
     `/apis/web/v1/summary?week=${args.week}&month=${args.month}&year=${args.year}&from=${args.from}&to=${args.to}`
   );
+
   return handleJson<RewindStats>(r);
 }
 
@@ -356,146 +398,4 @@ export {
   submitListen,
   getNowPlaying,
   getRewindStats,
-};
-type Track = {
-  id: number;
-  title: string;
-  artists: SimpleArtists[];
-  listen_count: number;
-  image: string;
-  album_id: number;
-  musicbrainz_id: string;
-  time_listened: number;
-  first_listen: number;
-  all_time_rank: number;
-};
-type Artist = {
-  id: number;
-  name: string;
-  image: string;
-  aliases: string[];
-  listen_count: number;
-  musicbrainz_id: string;
-  time_listened: number;
-  first_listen: number;
-  is_primary: boolean;
-  all_time_rank: number;
-};
-type Album = {
-  id: number;
-  title: string;
-  image: string;
-  listen_count: number;
-  is_various_artists: boolean;
-  artists: SimpleArtists[];
-  musicbrainz_id: string;
-  time_listened: number;
-  first_listen: number;
-  all_time_rank: number;
-};
-type Alias = {
-  id: number;
-  alias: string;
-  source: string;
-  is_primary: boolean;
-};
-type Listen = {
-  time: string;
-  track: Track;
-};
-type PaginatedResponse<T> = {
-  items: T[];
-  total_record_count: number;
-  has_next_page: boolean;
-  current_page: number;
-  items_per_page: number;
-};
-type Ranked<T> = {
-  item: T;
-  rank: number;
-};
-type ListenActivityItem = {
-  start_time: Date;
-  listens: number;
-};
-type InterestBucket = {
-  bucket_start: Date;
-  bucket_end: Date;
-  listen_count: number;
-};
-type SimpleArtists = {
-  name: string;
-  id: number;
-};
-type Stats = {
-  listen_count: number;
-  track_count: number;
-  album_count: number;
-  artist_count: number;
-  minutes_listened: number;
-};
-type SearchResponse = {
-  albums: Album[];
-  artists: Artist[];
-  tracks: Track[];
-};
-type User = {
-  id: number;
-  username: string;
-  role: "user" | "admin";
-};
-type ApiKey = {
-  id: number;
-  key: string;
-  label: string;
-  created_at: Date;
-};
-type ApiError = {
-  error: string;
-};
-type Config = {
-  default_theme: string;
-};
-type NowPlaying = {
-  currently_playing: boolean;
-  track: Track;
-};
-type RewindStats = {
-  title: string;
-  top_artists: Ranked<Artist>[];
-  top_albums: Ranked<Album>[];
-  top_tracks: Ranked<Track>[];
-  minutes_listened: number;
-  avg_minutes_listened_per_day: number;
-  plays: number;
-  avg_plays_per_day: number;
-  unique_tracks: number;
-  unique_albums: number;
-  unique_artists: number;
-  new_tracks: number;
-  new_albums: number;
-  new_artists: number;
-};
-
-export type {
-  getItemsArgs,
-  getActivityArgs,
-  getInterestArgs,
-  Track,
-  Artist,
-  Album,
-  Listen,
-  SearchResponse,
-  PaginatedResponse,
-  Ranked,
-  ListenActivityItem,
-  InterestBucket,
-  User,
-  Alias,
-  ApiKey,
-  ApiError,
-  Config,
-  NowPlaying,
-  Stats,
-  RewindStats,
 };
