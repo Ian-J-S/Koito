@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path"
 	"strconv"
 	"time"
 
@@ -96,76 +94,96 @@ func buildArtistMbidMap(artistName string, artistMBID uuid.UUID) []catalog.Artis
 	return []catalog.ArtistMbidMap{{Artist: artistName, Mbid: artistMBID}}
 }
 
-// buildSubmitListenOpts constructs the options for submitting a listen
-func buildSubmitListenOpts(track LastFMTrack, album string, albumMBID, artistMBID, trackMBID uuid.UUID, ts time.Time, mbzc mbz.MusicBrainzCaller) catalog.SubmitListenOpts {
-	artistMbidMap := buildArtistMbidMap(track.Artist.Text, artistMBID)
-	return catalog.SubmitListenOpts{
-		MbzCaller:          mbzc,
-		Artist:             track.Artist.Text,
-		ArtistNames:        []string{track.Artist.Text},
-		ArtistMbzIDs:       []uuid.UUID{artistMBID},
-		TrackTitle:         track.Name,
-		RecordingMbzID:     trackMBID,
-		ReleaseTitle:       album,
-		ReleaseMbzID:       albumMBID,
-		ArtistMbidMappings: artistMbidMap,
-		Client:             "lastfm",
-		Time:               ts,
-		UserID:             1,
-		SkipCacheImage:     !cfg.FetchImagesDuringImport(),
-	}
+// LastFMImporter implements the Importer interface for Last.fm exports.
+type LastFMImporter struct {
+	mbzc mbz.MusicBrainzCaller
 }
 
-func ImportLastFMFile(ctx context.Context, store db.DB, mbzc mbz.MusicBrainzCaller, filename string) error {
-	l := logger.FromContext(ctx)
-	l.Info().Msgf("Beginning LastFM import on file: %s", filename)
-	file, err := os.Open(path.Join(cfg.ConfigDir(), "import", filename))
-	if err != nil {
-		l.Err(err).Msgf("Failed to read import file: %s", filename)
-		return fmt.Errorf("ImportLastFMFile: %w", err)
-	}
-	defer file.Close()
-	var throttleFunc = func() {}
-	if ms := cfg.ThrottleImportMs(); ms > 0 {
-		throttleFunc = func() {
-			time.Sleep(time.Duration(ms) * time.Millisecond)
-		}
-	}
+// NewLastFMImporter creates a new Last.fm importer with the given MusicBrainz caller.
+func NewLastFMImporter(mbzc mbz.MusicBrainzCaller) *LastFMImporter {
+	return &LastFMImporter{mbzc: mbzc}
+}
+
+// Name returns the importer source name.
+func (l *LastFMImporter) Name() string {
+	return "lastfm"
+}
+
+// ParseRecords parses the Last.fm JSON export format.
+func (l *LastFMImporter) ParseRecords(data []byte) (interface{}, error) {
 	export := make([]LastFMExportPage, 0)
-	err = json.NewDecoder(file).Decode(&export)
+	err := json.Unmarshal(data, &export)
 	if err != nil {
-		return fmt.Errorf("ImportLastFMFile: %w", err)
+		return nil, fmt.Errorf("LastFMImporter.ParseRecords: %w", err)
 	}
+	return export, nil
+}
+
+// ProcessRecords iterates over Last.fm export pages and tracks, validates them, and processes valid entries.
+func (l *LastFMImporter) ProcessRecords(ctx context.Context, records interface{}, callback func(opts catalog.SubmitListenOpts) error) (int, error) {
+	logger := logger.FromContext(ctx)
+	export, ok := records.([]LastFMExportPage)
+	if !ok {
+		return 0, fmt.Errorf("LastFMImporter.ProcessRecords: invalid records type")
+	}
+
 	count := 0
-	for _, item := range export {
-		for _, track := range item.Track {
+	for _, page := range export {
+		for _, track := range page.Track {
+			// Validate track
 			if !validateTrack(track) {
-				l.Debug().Msg("Skipping invalid LastFM import item")
+				logger.Debug().Msg("Skipping invalid LastFM import item")
 				continue
 			}
 
+			// Normalize album name
 			album := normalizeAlbum(track.Album.Text, track.Name)
+
+			// Parse MBIDs
 			albumMBID, artistMBID, trackMBID := parseTrackMBIDs(track)
 
-			ts, ok := parseTrackTimestamp(track, l)
+			// Parse timestamp
+			ts, ok := parseTrackTimestamp(track, logger)
 			if !ok {
 				continue
 			}
 
+			// Check import time window
 			if !inImportTimeWindow(ts) {
-				l.Debug().Msgf("Skipping import due to import time rules")
+				logger.Debug().Msgf("Skipping import due to import time rules")
 				continue
 			}
 
-			opts := buildSubmitListenOpts(track, album, albumMBID, artistMBID, trackMBID, ts, mbzc)
-			err = catalog.SubmitListen(ctx, store, opts)
+			// Build options and process
+			artistMbidMap := buildArtistMbidMap(track.Artist.Text, artistMBID)
+			opts := catalog.SubmitListenOpts{
+				MbzCaller:          l.mbzc,
+				Artist:             track.Artist.Text,
+				ArtistNames:        []string{track.Artist.Text},
+				ArtistMbzIDs:       []uuid.UUID{artistMBID},
+				TrackTitle:         track.Name,
+				RecordingMbzID:     trackMBID,
+				ReleaseTitle:       album,
+				ReleaseMbzID:       albumMBID,
+				ArtistMbidMappings: artistMbidMap,
+				Client:             "lastfm",
+				Time:               ts,
+				UserID:             1,
+				SkipCacheImage:     !cfg.FetchImagesDuringImport(),
+			}
+
+			err := callback(opts)
 			if err != nil {
-				l.Err(err).Msg("Failed to import LastFM playback item")
-				return fmt.Errorf("ImportLastFMFile: %w", err)
+				return count, fmt.Errorf("LastFMImporter.ProcessRecords: %w", err)
 			}
 			count++
-			throttleFunc()
 		}
 	}
-	return finishImport(ctx, filename, count)
+
+	return count, nil
+}
+
+// ImportLastFMFile imports a Last.fm export file using the template workflow.
+func ImportLastFMFile(ctx context.Context, store db.DB, mbzc mbz.MusicBrainzCaller, filename string) error {
+	return ImportWithTemplate(ctx, store, filename, NewLastFMImporter(mbzc))
 }
