@@ -31,54 +31,5 @@ func TestMain(t *testing.M) {
 }
 
 func TestGenerateSummary(t *testing.T) {
-	// s := summary.Summary{
-	// 	Title: "20XX Rewind",
-	// TopArtistImage: path.Join("..", "..", "test_assets", "yuu.jpg"),
-	// TopArtists: []struct {
-	// 	Name            string
-	// 	Plays           int
-	// 	MinutesListened int
-	// }{
-	// 	{"CHUU", 738, 7321},
-	// 	{"Paramore", 738, 7321},
-	// 	{"ano", 738, 7321},
-	// 	{"NELKE", 738, 7321},
-	// 	{"ILLIT", 738, 7321},
-	// },
-	// TopAlbumImage: "",
-	// TopAlbums: []struct {
-	// 	Title           string
-	// 	Plays           int
-	// 	MinutesListened int
-	// }{
-	// 	{"Only cry in the rain", 738, 7321},
-	// 	{"Paramore", 738, 7321},
-	// 	{"ano", 738, 7321},
-	// 	{"NELKE", 738, 7321},
-	// 	{"ILLIT", 738, 7321},
-	// },
-	// TopTrackImage: "",
-	// TopTracks: []struct {
-	// 	Title           string
-	// 	Plays           int
-	// 	MinutesListened int
-	// }{
-	// 	{"虹の色よ鮮やかであれ (NELKE ver.)", 321, 12351},
-	// 	{"Paramore", 738, 7321},
-	// 	{"ano", 738, 7321},
-	// 	{"NELKE", 738, 7321},
-	// 	{"ILLIT", 738, 7321},
-	// },
-	// 	MinutesListened: 0,
-	// 	Plays:           0,
-	// 	AvgPlaysPerDay:  0,
-	// 	UniqueTracks:    0,
-	// 	UniqueAlbums:    0,
-	// 	UniqueArtists:   0,
-	// 	NewTracks:       0,
-	// 	NewAlbums:       0,
-	// 	NewArtists:      0,
-	// }
 
-	// assert.NoError(t, summary.GenerateImage(&s))
 }
