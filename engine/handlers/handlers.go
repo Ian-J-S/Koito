@@ -13,8 +13,14 @@ import (
 	"github.com/gabehf/koito/internal/logger"
 )
 
-const defaultLimitSize = 100
-const maximumLimit = 500
+const (
+	defaultLimitSize = 100
+	maximumLimit     = 500
+)
+
+var timezoneAliases = map[string]string{
+	"America/Knoxville": "America/Indiana/Knox",
+}
 
 func parseOptionalInt(value string) (int, error) {
 	if value == "" {
@@ -150,147 +156,37 @@ func TimeframeFromRequest(r *http.Request) db.Timeframe {
 }
 
 func parseTZ(r *http.Request) *time.Location {
-
-	// this map is obviously AI.
-	// i manually referenced as many links as I could and couldn't find any
-	// incorrect entries here so hopefully it is all correct.
-	overrides := map[string]string{
-		// --- North America ---
-		"America/Indianapolis":  "America/Indiana/Indianapolis",
-		"America/Knoxville":     "America/Indiana/Knoxville",
-		"America/Louisville":    "America/Kentucky/Louisville",
-		"America/Montreal":      "America/Toronto",
-		"America/Shiprock":      "America/Denver",
-		"America/Fort_Wayne":    "America/Indiana/Indianapolis",
-		"America/Virgin":        "America/Port_of_Spain",
-		"America/Santa_Isabel":  "America/Tijuana",
-		"America/Ensenada":      "America/Tijuana",
-		"America/Rosario":       "America/Argentina/Cordoba",
-		"America/Jujuy":         "America/Argentina/Jujuy",
-		"America/Mendoza":       "America/Argentina/Mendoza",
-		"America/Catamarca":     "America/Argentina/Catamarca",
-		"America/Cordoba":       "America/Argentina/Cordoba",
-		"America/Buenos_Aires":  "America/Argentina/Buenos_Aires",
-		"America/Coral_Harbour": "America/Atikokan",
-		"America/Atka":          "America/Adak",
-		"US/Alaska":             "America/Anchorage",
-		"US/Aleutian":           "America/Adak",
-		"US/Arizona":            "America/Phoenix",
-		"US/Central":            "America/Chicago",
-		"US/Eastern":            "America/New_York",
-		"US/East-Indiana":       "America/Indiana/Indianapolis",
-		"US/Hawaii":             "Pacific/Honolulu",
-		"US/Indiana-Starke":     "America/Indiana/Knoxville",
-		"US/Michigan":           "America/Detroit",
-		"US/Mountain":           "America/Denver",
-		"US/Pacific":            "America/Los_Angeles",
-		"US/Samoa":              "Pacific/Pago_Pago",
-		"Canada/Atlantic":       "America/Halifax",
-		"Canada/Central":        "America/Winnipeg",
-		"Canada/Eastern":        "America/Toronto",
-		"Canada/Mountain":       "America/Edmonton",
-		"Canada/Newfoundland":   "America/St_Johns",
-		"Canada/Pacific":        "America/Vancouver",
-
-		// --- Asia ---
-		"Asia/Calcutta":      "Asia/Kolkata",
-		"Asia/Saigon":        "Asia/Ho_Chi_Minh",
-		"Asia/Katmandu":      "Asia/Kathmandu",
-		"Asia/Rangoon":       "Asia/Yangon",
-		"Asia/Ulan_Bator":    "Asia/Ulaanbaatar",
-		"Asia/Macao":         "Asia/Macau",
-		"Asia/Tel_Aviv":      "Asia/Jerusalem",
-		"Asia/Ashkhabad":     "Asia/Ashgabat",
-		"Asia/Chungking":     "Asia/Chongqing",
-		"Asia/Dacca":         "Asia/Dhaka",
-		"Asia/Istanbul":      "Europe/Istanbul",
-		"Asia/Kashgar":       "Asia/Urumqi",
-		"Asia/Thimbu":        "Asia/Thimphu",
-		"Asia/Ujung_Pandang": "Asia/Makassar",
-		"ROC":                "Asia/Taipei",
-		"Iran":               "Asia/Tehran",
-		"Israel":             "Asia/Jerusalem",
-		"Japan":              "Asia/Tokyo",
-		"Singapore":          "Asia/Singapore",
-		"Hongkong":           "Asia/Hong_Kong",
-
-		// --- Europe ---
-		"Europe/Kiev":     "Europe/Kyiv",
-		"Europe/Belfast":  "Europe/London",
-		"Europe/Tiraspol": "Europe/Chisinau",
-		"Europe/Nicosia":  "Asia/Nicosia",
-		"Europe/Moscow":   "Europe/Moscow",
-		"W-SU":            "Europe/Moscow",
-		"GB":              "Europe/London",
-		"GB-Eire":         "Europe/London",
-		"Eire":            "Europe/Dublin",
-		"Poland":          "Europe/Warsaw",
-		"Portugal":        "Europe/Lisbon",
-		"Turkey":          "Europe/Istanbul",
-
-		// --- Australia / Pacific ---
-		"Australia/ACT":        "Australia/Sydney",
-		"Australia/Canberra":   "Australia/Sydney",
-		"Australia/LHI":        "Australia/Lord_Howe",
-		"Australia/North":      "Australia/Darwin",
-		"Australia/NSW":        "Australia/Sydney",
-		"Australia/Queensland": "Australia/Brisbane",
-		"Australia/South":      "Australia/Adelaide",
-		"Australia/Tasmania":   "Australia/Hobart",
-		"Australia/Victoria":   "Australia/Melbourne",
-		"Australia/West":       "Australia/Perth",
-		"Australia/Yancowinna": "Australia/Broken_Hill",
-		"Pacific/Samoa":        "Pacific/Pago_Pago",
-		"Pacific/Yap":          "Pacific/Chuuk",
-		"Pacific/Truk":         "Pacific/Chuuk",
-		"Pacific/Ponape":       "Pacific/Pohnpei",
-		"NZ":                   "Pacific/Auckland",
-		"NZ-CHAT":              "Pacific/Chatham",
-
-		// --- Africa ---
-		"Africa/Asmera":   "Africa/Asmara",
-		"Africa/Timbuktu": "Africa/Bamako",
-		"Egypt":           "Africa/Cairo",
-		"Libya":           "Africa/Tripoli",
-
-		// --- Atlantic ---
-		"Atlantic/Faeroe":    "Atlantic/Faroe",
-		"Atlantic/Jan_Mayen": "Europe/Oslo",
-		"Iceland":            "Atlantic/Reykjavik",
-
-		// --- Etc / Misc ---
-		"UTC":       "UTC",
-		"Etc/UTC":   "UTC",
-		"Etc/GMT":   "UTC",
-		"GMT":       "UTC",
-		"Zulu":      "UTC",
-		"Universal": "UTC",
+	if forcedTZ := cfg.ForceTZ(); forcedTZ != nil {
+		return forcedTZ
 	}
 
-	if cfg.ForceTZ() != nil {
-		return cfg.ForceTZ()
-	}
-
-	if tz := r.URL.Query().Get("tz"); tz != "" {
-		if fixedTz, exists := overrides[tz]; exists {
-			tz = fixedTz
-		}
-		if loc, err := time.LoadLocation(tz); err == nil {
-			return loc
-		}
+	if loc := loadRequestLocation(r.URL.Query().Get("tz")); loc != nil {
+		return loc
 	}
 
 	if c, err := r.Cookie("tz"); err == nil {
-		var tz string
-		if fixedTz, exists := overrides[c.Value]; exists {
-			tz = fixedTz
-		} else {
-			tz = c.Value
-		}
-		if loc, err := time.LoadLocation(tz); err == nil {
+		if loc := loadRequestLocation(c.Value); loc != nil {
 			return loc
 		}
 	}
 
 	return time.Now().Location()
+}
+
+func loadRequestLocation(name string) *time.Location {
+	if name == "" {
+		return nil
+	}
+
+	if loc, err := time.LoadLocation(name); err == nil {
+		return loc
+	}
+
+	if alias, exists := timezoneAliases[name]; exists {
+		if loc, err := time.LoadLocation(alias); err == nil {
+			return loc
+		}
+	}
+
+	return nil
 }
