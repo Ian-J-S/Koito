@@ -1,3 +1,5 @@
+import { login, logout } from "./authApi";
+
 interface getItemsArgs {
   limit: number;
   period: string;
@@ -6,6 +8,7 @@ interface getItemsArgs {
   album_id?: number;
   track_id?: number;
 }
+
 interface getActivityArgs {
   step: string;
   range: number;
@@ -15,6 +18,7 @@ interface getActivityArgs {
   album_id: number;
   track_id: number;
 }
+
 interface timeframe {
   week?: number;
   month?: number;
@@ -23,6 +27,7 @@ interface timeframe {
   to?: number;
   period?: string;
 }
+
 interface getInterestArgs {
   buckets: number;
   artist_id: number;
@@ -35,6 +40,7 @@ async function handleJson<T>(r: Response): Promise<T> {
     const err = await r.json();
     throw Error(err.error);
   }
+
   return (await r.json()) as T;
 }
 
@@ -109,6 +115,7 @@ function imageUrl(id: string, size: string) {
   if (!id) {
     id = "default";
   }
+
   return `/images/${size}/${id}`;
 }
 
@@ -179,6 +186,7 @@ function getCfg(): Promise<Config> {
 
 function submitListen(id: string, ts: Date): Promise<Response> {
   const form = new URLSearchParams();
+
   form.append("track_id", id);
 
   const ms = new Date(ts).getTime();
@@ -198,6 +206,7 @@ function getApiKeys(): Promise<ApiKey[]> {
 
 const createApiKey = async (label: string): Promise<ApiKey> => {
   const form = new URLSearchParams();
+
   form.append("label", label);
 
   return requestJson<ApiKey>(`/apis/web/v1/user/apikeys`, {
@@ -214,6 +223,7 @@ function deleteApiKey(id: number): Promise<Response> {
 
 function updateApiKeyLabel(id: number, label: string): Promise<Response> {
   const form = new URLSearchParams();
+
   form.append("id", String(id));
   form.append("label", label);
 
@@ -231,6 +241,7 @@ function deleteItem(itemType: string, id: number): Promise<Response> {
 
 function updateUser(username: string, password: string) {
   const form = new URLSearchParams();
+
   form.append("username", username);
   form.append("password", password);
 
@@ -250,6 +261,7 @@ function createAlias(
   alias: string
 ): Promise<Response> {
   const form = new URLSearchParams();
+
   form.append(`${type}_id`, String(id));
   form.append("alias", alias);
 
@@ -265,6 +277,7 @@ function deleteAlias(
   alias: string
 ): Promise<Response> {
   const form = new URLSearchParams();
+
   form.append(`${type}_id`, String(id));
   form.append("alias", alias);
 
@@ -280,6 +293,7 @@ function setPrimaryAlias(
   alias: string
 ): Promise<Response> {
   const form = new URLSearchParams();
+
   form.append(`${type}_id`, String(id));
   form.append("alias", alias);
 
@@ -295,6 +309,7 @@ function updateMbzId(
   mbzid: string
 ): Promise<Response> {
   const form = new URLSearchParams();
+
   form.append(`${type}_id`, String(id));
   form.append("mbz_id", mbzid);
 
