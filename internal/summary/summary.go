@@ -49,7 +49,6 @@ type GenerateSummaryOpts struct {
 }
 
 func GenerateSummary(ctx context.Context, store db.DB, opts GenerateSummaryOpts) (summary *Summary, err error) {
-	userId := opts.UserID
 	timeframe := opts.Timeframe
 	title := opts.Title
 
