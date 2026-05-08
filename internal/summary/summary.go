@@ -34,179 +34,121 @@ type GenerateSummaryOpts struct {
 }
 
 func GenerateSummary(ctx context.Context, store db.DB, opts GenerateSummaryOpts) (summary *Summary, err error) {
+	userId := opts.UserID
 	timeframe := opts.Timeframe
 	title := opts.Title
+
+	_ = userId
 
 	summary = new(Summary)
 	summary.Title = title
 
-	topArtists, err := store.GetTopArtistsPaginated(ctx, db.GetItemsOpts{
-		Page:      1,
-		Limit:     summaryTopItemsLimit,
-		Timeframe: timeframe,
-	})
+	topArtists, err := store.GetTopArtistsPaginated(ctx, db.GetItemsOpts{Page: 1, Limit: 5, Timeframe: timeframe})
 	if err != nil {
 		return nil, fmt.Errorf("GenerateSummary: %w", err)
 	}
 	summary.TopArtists = topArtists.Items
-
-	if err = enrichSummaryItems(ctx, store, summary.TopArtists, timeframe, func(artist *models.Artist) db.TimeListenedOpts {
-		return db.TimeListenedOpts{ArtistID: artist.ID}
-	}, func(artist *models.Artist, timeListened, listens int64) {
-		artist.TimeListened = timeListened
-		artist.ListenCount = listens
-	}); err != nil {
-		return nil, fmt.Errorf("GenerateSummary: %w", err)
+	// replace ListenCount and TimeListened with stats from timeframe
+	for i, artist := range summary.TopArtists {
+		timelistened, err := store.CountTimeListenedToItem(ctx, db.TimeListenedOpts{ArtistID: artist.Item.ID, Timeframe: timeframe})
+		if err != nil {
+			return nil, fmt.Errorf("GenerateSummary: %w", err)
+		}
+		listens, err := store.CountListensToItem(ctx, db.TimeListenedOpts{ArtistID: artist.Item.ID, Timeframe: timeframe})
+		if err != nil {
+			return nil, fmt.Errorf("GenerateSummary: %w", err)
+		}
+		summary.TopArtists[i].Item.TimeListened = timelistened
+		summary.TopArtists[i].Item.ListenCount = listens
 	}
 
-	topAlbums, err := store.GetTopAlbumsPaginated(ctx, db.GetItemsOpts{
-		Page:      1,
-		Limit:     summaryTopItemsLimit,
-		Timeframe: timeframe,
-	})
+	topAlbums, err := store.GetTopAlbumsPaginated(ctx, db.GetItemsOpts{Page: 1, Limit: 5, Timeframe: timeframe})
 	if err != nil {
 		return nil, fmt.Errorf("GenerateSummary: %w", err)
 	}
 	summary.TopAlbums = topAlbums.Items
-
-	if err = enrichSummaryItems(ctx, store, summary.TopAlbums, timeframe, func(album *models.Album) db.TimeListenedOpts {
-		return db.TimeListenedOpts{AlbumID: album.ID}
-	}, func(album *models.Album, timeListened, listens int64) {
-		album.TimeListened = timeListened
-		album.ListenCount = listens
-	}); err != nil {
-		return nil, fmt.Errorf("GenerateSummary: %w", err)
+	// replace ListenCount and TimeListened with stats from timeframe
+	for i, album := range summary.TopAlbums {
+		timelistened, err := store.CountTimeListenedToItem(ctx, db.TimeListenedOpts{AlbumID: album.Item.ID, Timeframe: timeframe})
+		if err != nil {
+			return nil, fmt.Errorf("GenerateSummary: %w", err)
+		}
+		listens, err := store.CountListensToItem(ctx, db.TimeListenedOpts{AlbumID: album.Item.ID, Timeframe: timeframe})
+		if err != nil {
+			return nil, fmt.Errorf("GenerateSummary: %w", err)
+		}
+		summary.TopAlbums[i].Item.TimeListened = timelistened
+		summary.TopAlbums[i].Item.ListenCount = listens
 	}
 
-	topTracks, err := store.GetTopTracksPaginated(ctx, db.GetItemsOpts{
-		Page:      1,
-		Limit:     summaryTopItemsLimit,
-		Timeframe: timeframe,
-	})
+	topTracks, err := store.GetTopTracksPaginated(ctx, db.GetItemsOpts{Page: 1, Limit: 5, Timeframe: timeframe})
 	if err != nil {
 		return nil, fmt.Errorf("GenerateSummary: %w", err)
 	}
 	summary.TopTracks = topTracks.Items
-
-	if err = enrichSummaryItems(ctx, store, summary.TopTracks, timeframe, func(track *models.Track) db.TimeListenedOpts {
-		return db.TimeListenedOpts{TrackID: track.ID}
-	}, func(track *models.Track, timeListened, listens int64) {
-		track.TimeListened = timeListened
-		track.ListenCount = listens
-	}); err != nil {
-		return nil, fmt.Errorf("GenerateSummary: %w", err)
+	// replace ListenCount and TimeListened with stats from timeframe
+	for i, track := range summary.TopTracks {
+		timelistened, err := store.CountTimeListenedToItem(ctx, db.TimeListenedOpts{TrackID: track.Item.ID, Timeframe: timeframe})
+		if err != nil {
+			return nil, fmt.Errorf("GenerateSummary: %w", err)
+		}
+		listens, err := store.CountListensToItem(ctx, db.TimeListenedOpts{TrackID: track.Item.ID, Timeframe: timeframe})
+		if err != nil {
+			return nil, fmt.Errorf("GenerateSummary: %w", err)
+		}
+		summary.TopTracks[i].Item.TimeListened = timelistened
+		summary.TopTracks[i].Item.ListenCount = listens
 	}
 
 	t1, t2 := db.TimeframeToTimeRange(timeframe)
 	daycount := int(t2.Sub(t1).Hours() / 24)
-
 	// bandaid
 	if daycount == 0 {
 		daycount = 1
 	}
 
-	stats := []summaryStat{
-		{
-			count: store.CountTimeListened,
-			apply: func(count int64) {
-				summary.MinutesListened = int(count) / 60
-				summary.AvgMinutesPerDay = summary.MinutesListened / daycount
-			},
-		},
-		{
-			count: store.CountListens,
-			apply: func(count int64) {
-				summary.Plays = int(count)
-				summary.AvgPlaysPerDay = float32(summary.Plays) / float32(daycount)
-			},
-		},
-		{
-			count: store.CountTracks,
-			apply: func(count int64) {
-				summary.UniqueTracks = int(count)
-			},
-		},
-		{
-			count: store.CountAlbums,
-			apply: func(count int64) {
-				summary.UniqueAlbums = int(count)
-			},
-		},
-		{
-			count: store.CountArtists,
-			apply: func(count int64) {
-				summary.UniqueArtists = int(count)
-			},
-		},
-		{
-			count: store.CountNewTracks,
-			apply: func(count int64) {
-				summary.NewTracks = int(count)
-			},
-		},
-		{
-			count: store.CountNewAlbums,
-			apply: func(count int64) {
-				summary.NewAlbums = int(count)
-			},
-		},
-		{
-			count: store.CountNewArtists,
-			apply: func(count int64) {
-				summary.NewArtists = int(count)
-			},
-		},
-	}
-
-	if err = applySummaryStats(ctx, timeframe, stats); err != nil {
+	tmp, err := store.CountTimeListened(ctx, timeframe)
+	if err != nil {
 		return nil, fmt.Errorf("GenerateSummary: %w", err)
 	}
+	summary.MinutesListened = int(tmp) / 60
+	summary.AvgMinutesPerDay = summary.MinutesListened / daycount
+	tmp, err = store.CountListens(ctx, timeframe)
+	if err != nil {
+		return nil, fmt.Errorf("GenerateSummary: %w", err)
+	}
+	summary.Plays = int(tmp)
+	summary.AvgPlaysPerDay = float32(summary.Plays) / float32(daycount)
+	tmp, err = store.CountTracks(ctx, timeframe)
+	if err != nil {
+		return nil, fmt.Errorf("GenerateSummary: %w", err)
+	}
+	summary.UniqueTracks = int(tmp)
+	tmp, err = store.CountAlbums(ctx, timeframe)
+	if err != nil {
+		return nil, fmt.Errorf("GenerateSummary: %w", err)
+	}
+	summary.UniqueAlbums = int(tmp)
+	tmp, err = store.CountArtists(ctx, timeframe)
+	if err != nil {
+		return nil, fmt.Errorf("GenerateSummary: %w", err)
+	}
+	summary.UniqueArtists = int(tmp)
+	tmp, err = store.CountNewTracks(ctx, timeframe)
+	if err != nil {
+		return nil, fmt.Errorf("GenerateSummary: %w", err)
+	}
+	summary.NewTracks = int(tmp)
+	tmp, err = store.CountNewAlbums(ctx, timeframe)
+	if err != nil {
+		return nil, fmt.Errorf("GenerateSummary: %w", err)
+	}
+	summary.NewAlbums = int(tmp)
+	tmp, err = store.CountNewArtists(ctx, timeframe)
+	if err != nil {
+		return nil, fmt.Errorf("GenerateSummary: %w", err)
+	}
+	summary.NewArtists = int(tmp)
 
 	return summary, nil
-}
-
-func enrichSummaryItems[T any](
-	ctx context.Context,
-	store db.DB,
-	items []db.RankedItem[T],
-	timeframe db.Timeframe,
-	getOpts func(T) db.TimeListenedOpts,
-	setStats func(T, int64, int64),
-) error {
-	for _, rankedItem := range items {
-		countOpts := getOpts(rankedItem.Item)
-		countOpts.Timeframe = timeframe
-
-		timeListened, err := store.CountTimeListenedToItem(ctx, countOpts)
-		if err != nil {
-			return err
-		}
-
-		listens, err := store.CountListensToItem(ctx, countOpts)
-		if err != nil {
-			return err
-		}
-
-		setStats(rankedItem.Item, timeListened, listens)
-	}
-
-	return nil
-}
-
-type summaryStat struct {
-	count func(context.Context, db.Timeframe) (int64, error)
-	apply func(int64)
-}
-
-func applySummaryStats(ctx context.Context, timeframe db.Timeframe, stats []summaryStat) error {
-	for _, stat := range stats {
-		count, err := stat.count(ctx, timeframe)
-		if err != nil {
-			return err
-		}
-
-		stat.apply(count)
-	}
-
-	return nil
 }
